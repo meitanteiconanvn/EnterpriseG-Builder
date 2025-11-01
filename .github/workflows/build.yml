@@ -315,7 +315,16 @@ jobs:
       shell: pwsh
       run: |
         Write-Host "Running EnterpriseG build process..."
-        Write-Host "Build Number: ${{ github.event.inputs.build_number }}"
+        
+        # Read detected build number from previous step
+        if (Test-Path "detected_build_number.txt") {
+          $buildNumber = Get-Content "detected_build_number.txt" -Raw
+          $buildNumber = $buildNumber.Trim()
+          Write-Host "Build Number: $buildNumber"
+        } else {
+          Write-Warning "Build number not detected. Using default."
+        }
+        
         Write-Host "Target SKU: ${{ github.event.inputs.target_sku }}"
         
         # Bedi.cmd will check Bedi.ini and if config matches, it will skip menu

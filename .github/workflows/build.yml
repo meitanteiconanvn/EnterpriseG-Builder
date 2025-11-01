@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       build_number:
-        description: 'Windows Build Number (e.g., 22621, 22631, 25398, 26100)'
+        description: 'Windows Build Number'
         required: true
         default: '22621'
         type: choice
@@ -17,7 +17,7 @@ on:
           - '25398'
           - '26100'
       target_sku:
-        description: 'Target SKU Edition'
+        description: 'Target SKU'
         required: true
         default: 'EnterpriseG'
         type: choice
@@ -27,21 +27,21 @@ on:
           - 'WNC'
           - 'Starter'
       iso_url:
-        description: 'URL to download Windows ISO file'
+        description: 'Windows ISO URL'
         required: true
         type: string
       iso_output_name:
-        description: 'Output ISO filename (without extension)'
+        description: 'Output filename'
         required: false
         default: 'Windows-EnterpriseG'
         type: string
       wim_index:
-        description: 'WIM Index (auto-detect if empty)'
+        description: 'WIM Index (empty=auto)'
         required: false
         default: ''
         type: string
       msedge:
-        description: 'Microsoft Edge'
+        description: 'Edge'
         required: false
         default: 'With'
         type: choice
@@ -49,7 +49,7 @@ on:
           - 'With'
           - 'Without'
       defender:
-        description: 'Windows Defender'
+        description: 'Defender'
         required: false
         default: 'With'
         type: choice
@@ -57,7 +57,7 @@ on:
           - 'With'
           - 'Without'
       winre:
-        description: 'Windows Recovery'
+        description: 'WinRE'
         required: false
         default: 'With'
         type: choice

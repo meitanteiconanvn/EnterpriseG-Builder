@@ -402,8 +402,6 @@ exit /b %ERRORLEVEL%
             exit $process.ExitCode
         }
         
-      continue-on-error: true
-      
     - name: Check build output
       shell: pwsh
       run: |

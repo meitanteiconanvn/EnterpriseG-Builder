@@ -35,6 +35,11 @@ on:
         required: false
         default: 'Windows-EnterpriseG'
         type: string
+      wim_index:
+        description: 'WIM Index for Windows Professional Edition (auto-detect if not specified)'
+        required: false
+        default: ''
+        type: string
       msedge:
         description: 'Include Microsoft Edge'
         required: false
@@ -116,7 +121,9 @@ jobs:
         
         $isoPath = "$PWD\source.iso"
         $mountPath = "$PWD\iso_mount"
+        $sourceWimPath = "$PWD\source_install.wim"
         $wimPath = "$PWD\install.wim"
+        $wimIndex = "${{ github.event.inputs.wim_index }}"
         
         # Mount ISO
         Write-Host "Mounting ISO..."
@@ -140,7 +147,7 @@ jobs:
         }
         
         Write-Host "Copying install.wim from ISO..."
-        Copy-Item -Path $sourceWim -Destination $wimPath -Force
+        Copy-Item -Path $sourceWim -Destination $sourceWimPath -Force
         
         # Also copy ISO structure for later ISO recreation
         Write-Host "Copying ISO structure..."
@@ -151,14 +158,71 @@ jobs:
         Write-Host "Unmounting ISO..."
         Dismount-DiskImage -ImagePath $isoPath
         
-        # Verify install.wim exists
-        if (-not (Test-Path $wimPath)) {
+        # Verify source install.wim exists
+        if (-not (Test-Path $sourceWimPath)) {
           Write-Error "install.wim extraction failed"
           exit 1
         }
         
-        $wimSize = (Get-Item $wimPath).Length / 1GB
+        $wimSize = (Get-Item $sourceWimPath).Length / 1GB
         Write-Host "install.wim extracted successfully. Size: $([math]::Round($wimSize, 2)) GB"
+        
+        # Get WIM info to find Professional edition index
+        Write-Host "Analyzing WIM file to find Professional edition..."
+        $wimlibPath = "$PWD\Files\wimlib-imagex.exe"
+        
+        if (-not (Test-Path $wimlibPath)) {
+          Write-Warning "wimlib-imagex.exe not found, using full install.wim"
+          Copy-Item -Path $sourceWimPath -Destination $wimPath -Force
+        } else {
+          # Get WIM info
+          $wimInfo = & $wimlibPath info $sourceWimPath 2>&1 | Out-String
+          
+          Write-Host "WIM Info:"
+          Write-Host $wimInfo
+          
+          # Find Professional edition index
+          $proIndex = $null
+          if ([string]::IsNullOrWhiteSpace($wimIndex)) {
+            # Auto-detect Professional edition
+            $lines = $wimInfo -split "`n"
+            $currentIndex = 0
+            foreach ($line in $lines) {
+              if ($line -match "Index:\s+(\d+)") {
+                $currentIndex = [int]$matches[1]
+              }
+              if ($line -match "Edition ID:\s+Professional" -or $line -match "Name:\s+.*Professional") {
+                $proIndex = $currentIndex
+                Write-Host "Found Professional edition at index: $proIndex"
+                break
+              }
+            }
+            
+            if (-not $proIndex) {
+              Write-Warning "Could not auto-detect Professional edition. Trying index 1..."
+              $proIndex = 1
+            }
+          } else {
+            $proIndex = [int]$wimIndex
+            Write-Host "Using specified WIM index: $proIndex"
+          }
+          
+          Write-Host "Extracting Professional edition (index $proIndex) from WIM..."
+          
+          # Extract only Professional edition to install.wim
+          & $wimlibPath export $sourceWimPath $proIndex $wimPath --compress=none
+          
+          if (-not (Test-Path $wimPath)) {
+            Write-Error "Failed to extract Professional edition from WIM"
+            exit 1
+          }
+          
+          $extractedSize = (Get-Item $wimPath).Length / 1GB
+          Write-Host "Professional edition extracted successfully. Size: $([math]::Round($extractedSize, 2)) GB"
+          
+          # Clean up source WIM
+          Remove-Item -Path $sourceWimPath -Force -ErrorAction SilentlyContinue
+        }
         
     - name: Configure Bedi.ini
       shell: pwsh

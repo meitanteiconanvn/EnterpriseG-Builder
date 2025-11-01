@@ -3,19 +3,6 @@ name: Build EnterpriseG Edition
 on:
   workflow_dispatch:
     inputs:
-      build_number:
-        description: 'Windows Build Number'
-        required: true
-        default: '22621'
-        type: choice
-        options:
-          - '17763'
-          - '19041'
-          - '22000'
-          - '22621'
-          - '22631'
-          - '25398'
-          - '26100'
       target_sku:
         description: 'Target SKU'
         required: true
@@ -166,9 +153,11 @@ jobs:
         $wimSize = (Get-Item $sourceWimPath).Length / 1GB
         Write-Host "install.wim extracted successfully. Size: $([math]::Round($wimSize, 2)) GB"
         
-        # Get WIM info to find Professional edition index
-        Write-Host "Analyzing WIM file to find Professional edition..."
+        # Get WIM info to find Professional edition index and build number
+        Write-Host "Analyzing WIM file to find Professional edition and build number..."
         $wimlibPath = "$PWD\Files\wimlib-imagex.exe"
+        
+        $detectedBuildNumber = $null
         
         if (-not (Test-Path $wimlibPath)) {
           Write-Warning "wimlib-imagex.exe not found, using full install.wim"
@@ -180,23 +169,40 @@ jobs:
           Write-Host "WIM Info:"
           Write-Host $wimInfo
           
-          # Find Professional edition index
+          # Extract build number from WIM info
+          # Format: Version: 10.0.22621.1 or similar
+          $lines = $wimInfo -split "`n"
+          $currentIndex = 0
           $proIndex = $null
-          if ([string]::IsNullOrWhiteSpace($wimIndex)) {
-            # Auto-detect Professional edition
-            $lines = $wimInfo -split "`n"
-            $currentIndex = 0
-            foreach ($line in $lines) {
-              if ($line -match "Index:\s+(\d+)") {
-                $currentIndex = [int]$matches[1]
-              }
-              if ($line -match "Edition ID:\s+Professional" -or $line -match "Name:\s+.*Professional") {
-                $proIndex = $currentIndex
-                Write-Host "Found Professional edition at index: $proIndex"
-                break
+          
+          foreach ($line in $lines) {
+            # Detect build number from version string
+            if ($line -match "Version:\s+10\.0\.(\d+)\.(\d+)") {
+              $buildNum = $matches[1]
+              if (-not $detectedBuildNumber) {
+                $detectedBuildNumber = $buildNum
+                Write-Host "Detected Windows Build Number: $detectedBuildNumber"
               }
             }
             
+            # Find Professional edition index
+            if ($line -match "Index:\s+(\d+)") {
+              $currentIndex = [int]$matches[1]
+            }
+            if ($line -match "Edition ID:\s+Professional" -or $line -match "Name:\s+.*Professional") {
+              $proIndex = $currentIndex
+              Write-Host "Found Professional edition at index: $proIndex"
+            }
+          }
+          
+          # Save build number to file for later steps
+          if ($detectedBuildNumber) {
+            Set-Content -Path "detected_build_number.txt" -Value $detectedBuildNumber
+            Write-Host "Build number saved to detected_build_number.txt"
+          }
+          
+          # Find Professional edition index
+          if ([string]::IsNullOrWhiteSpace($wimIndex)) {
             if (-not $proIndex) {
               Write-Warning "Could not auto-detect Professional edition. Trying index 1..."
               $proIndex = 1
@@ -223,17 +229,31 @@ jobs:
           Remove-Item -Path $sourceWimPath -Force -ErrorAction SilentlyContinue
         }
         
+        if (-not $detectedBuildNumber) {
+          Write-Warning "Could not auto-detect build number from WIM. Using default 22621."
+          $detectedBuildNumber = "22621"
+          Set-Content -Path "detected_build_number.txt" -Value $detectedBuildNumber
+        }
+        
     - name: Configure Bedi.ini
       shell: pwsh
       run: |
-        $buildNumber = "${{ github.event.inputs.build_number }}"
+        # Read detected build number from previous step
+        if (Test-Path "detected_build_number.txt") {
+          $buildNumber = Get-Content "detected_build_number.txt" -Raw
+          $buildNumber = $buildNumber.Trim()
+          Write-Host "Using detected build number: $buildNumber"
+        } else {
+          Write-Warning "Build number file not found. Using default 22621."
+          $buildNumber = "22621"
+        }
+        
         $targetSku = "${{ github.event.inputs.target_sku }}"
         $msedge = "${{ github.event.inputs.msedge }}"
         $defender = "${{ github.event.inputs.defender }}"
         $winre = "${{ github.event.inputs.winre }}"
         
         # Set defaults if not provided (for push/PR events)
-        if ([string]::IsNullOrWhiteSpace($buildNumber)) { $buildNumber = "22621" }
         if ([string]::IsNullOrWhiteSpace($targetSku)) { $targetSku = "EnterpriseG" }
         if ([string]::IsNullOrWhiteSpace($msedge)) { $msedge = "With" }
         if ([string]::IsNullOrWhiteSpace($defender)) { $defender = "With" }
@@ -408,9 +428,13 @@ jobs:
       run: |
         Write-Host "Checking for build output..."
         
-        # EnterpriseG Builder creates output files in root directory
-        $buildNumber = "${{ github.event.inputs.build_number }}"
-        if ([string]::IsNullOrWhiteSpace($buildNumber)) { $buildNumber = "22621" }
+        # Read detected build number
+        if (Test-Path "detected_build_number.txt") {
+          $buildNumber = Get-Content "detected_build_number.txt" -Raw
+          $buildNumber = $buildNumber.Trim()
+        } else {
+          $buildNumber = "22621"
+        }
         
         # Look for output WIM files
         $wimFiles = Get-ChildItem -Path "." -Filter "install.wim" -ErrorAction SilentlyContinue

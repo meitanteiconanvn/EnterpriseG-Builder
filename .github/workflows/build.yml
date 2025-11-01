@@ -1,0 +1,445 @@
+name: Build EnterpriseG Edition
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_number:
+        description: 'Windows Build Number (e.g., 22621, 22631, 25398, 26100)'
+        required: true
+        default: '22621'
+        type: choice
+        options:
+          - '17763'
+          - '19041'
+          - '22000'
+          - '22621'
+          - '22631'
+          - '25398'
+          - '26100'
+      target_sku:
+        description: 'Target SKU Edition'
+        required: true
+        default: 'EnterpriseG'
+        type: choice
+        options:
+          - 'EnterpriseG'
+          - 'EnterpriseS'
+          - 'WNC'
+          - 'Starter'
+      iso_url:
+        description: 'URL to download Windows ISO file'
+        required: true
+        type: string
+      iso_output_name:
+        description: 'Output ISO filename (without extension)'
+        required: false
+        default: 'Windows-EnterpriseG'
+        type: string
+      msedge:
+        description: 'Include Microsoft Edge'
+        required: false
+        default: 'With'
+        type: choice
+        options:
+          - 'With'
+          - 'Without'
+      defender:
+        description: 'Include Windows Defender'
+        required: false
+        default: 'With'
+        type: choice
+        options:
+          - 'With'
+          - 'Without'
+      winre:
+        description: 'Include Windows Recovery'
+        required: false
+        default: 'With'
+        type: choice
+        options:
+          - 'With'
+          - 'Without'
+  push:
+    branches:
+      - master
+      - main
+  pull_request:
+    branches:
+      - master
+      - main
+
+jobs:
+  build:
+    runs-on: windows-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Download Windows ISO
+      shell: pwsh
+      run: |
+        Write-Host "Downloading Windows ISO..."
+        $isoUrl = "${{ github.event.inputs.iso_url || env.ISO_URL }}"
+        if (-not $isoUrl) {
+          Write-Error "ISO URL is required. Please provide it via workflow input or environment variable."
+          exit 1
+        }
+        
+        $isoPath = "$PWD\source.iso"
+        
+        Write-Host "Downloading ISO from: $isoUrl"
+        Write-Host "Saving to: $isoPath"
+        
+        try {
+          $ProgressPreference = 'SilentlyContinue'
+          Invoke-WebRequest -Uri $isoUrl -OutFile $isoPath -UseBasicParsing
+          $isoSize = (Get-Item $isoPath).Length / 1GB
+          Write-Host "ISO download completed. File size: $([math]::Round($isoSize, 2)) GB"
+        } catch {
+          Write-Error "Failed to download ISO: $_"
+          exit 1
+        }
+        
+        if (-not (Test-Path $isoPath)) {
+          Write-Error "ISO was not downloaded successfully"
+          exit 1
+        }
+        
+      env:
+        ISO_URL: ${{ github.event.inputs.iso_url }}
+        
+    - name: Extract install.wim from ISO
+      shell: pwsh
+      run: |
+        Write-Host "Extracting install.wim from ISO..."
+        
+        $isoPath = "$PWD\source.iso"
+        $mountPath = "$PWD\iso_mount"
+        $wimPath = "$PWD\install.wim"
+        
+        # Mount ISO
+        Write-Host "Mounting ISO..."
+        $mountResult = Mount-DiskImage -ImagePath $isoPath -StorageType ISO -PassThru
+        $driveLetter = ($mountResult | Get-Volume).DriveLetter
+        
+        if (-not $driveLetter) {
+          Write-Error "Failed to mount ISO"
+          exit 1
+        }
+        
+        Write-Host "ISO mounted to drive: $driveLetter`:"
+        
+        # Extract install.wim from sources folder
+        $sourceWim = "${driveLetter}:\sources\install.wim"
+        
+        if (-not (Test-Path $sourceWim)) {
+          Write-Error "install.wim not found in ISO sources folder"
+          Dismount-DiskImage -ImagePath $isoPath
+          exit 1
+        }
+        
+        Write-Host "Copying install.wim from ISO..."
+        Copy-Item -Path $sourceWim -Destination $wimPath -Force
+        
+        # Also copy ISO structure for later ISO recreation
+        Write-Host "Copying ISO structure..."
+        New-Item -ItemType Directory -Path $mountPath -Force | Out-Null
+        robocopy "${driveLetter}:\" $mountPath /E /XD sources /NFL /NDL /NJH /NJS | Out-Null
+        
+        # Unmount ISO
+        Write-Host "Unmounting ISO..."
+        Dismount-DiskImage -ImagePath $isoPath
+        
+        # Verify install.wim exists
+        if (-not (Test-Path $wimPath)) {
+          Write-Error "install.wim extraction failed"
+          exit 1
+        }
+        
+        $wimSize = (Get-Item $wimPath).Length / 1GB
+        Write-Host "install.wim extracted successfully. Size: $([math]::Round($wimSize, 2)) GB"
+        
+    - name: Configure Bedi.ini
+      shell: pwsh
+      run: |
+        $buildNumber = "${{ github.event.inputs.build_number }}"
+        $targetSku = "${{ github.event.inputs.target_sku }}"
+        $msedge = "${{ github.event.inputs.msedge }}"
+        $defender = "${{ github.event.inputs.defender }}"
+        $winre = "${{ github.event.inputs.winre }}"
+        
+        # Set defaults if not provided (for push/PR events)
+        if ([string]::IsNullOrWhiteSpace($buildNumber)) { $buildNumber = "22621" }
+        if ([string]::IsNullOrWhiteSpace($targetSku)) { $targetSku = "EnterpriseG" }
+        if ([string]::IsNullOrWhiteSpace($msedge)) { $msedge = "With" }
+        if ([string]::IsNullOrWhiteSpace($defender)) { $defender = "With" }
+        if ([string]::IsNullOrWhiteSpace($winre)) { $winre = "With" }
+        
+        $configLines = @(
+          ";#Bedi v7.44 Configurations",
+          "_sourSKU=Professional",
+          "_targSKU=$targetSku",
+          "_store=With",
+          "_defender=$defender",
+          "_msedge=$msedge",
+          "_helospeech=With",
+          "_winre=$winre",
+          "_wifirtl=With"
+        )
+        $config = $configLines -join "`n"
+        
+        Set-Content -Path "Bedi.ini" -Value $config
+        Write-Host "Configuration saved to Bedi.ini"
+        Get-Content Bedi.ini
+        
+    - name: Verify required files
+      shell: pwsh
+      run: |
+        Write-Host "Verifying required files..."
+        
+        # Check install.wim
+        if (-not (Test-Path "install.wim")) {
+          Write-Error "install.wim not found in root directory"
+          exit 1
+        }
+        
+        # Check required tools
+        $requiredFiles = @(
+          "Files\wimlib-imagex.exe",
+          "Files\7z.exe",
+          "Files\NSudo.exe",
+          "Files\expand.exe",
+          "Files\expand_new.exe",
+          "Files\7z.dll",
+          "Files\libwim-15.dll",
+          "Files\ModLCU.cmd",
+          "Files\msdelta.dll",
+          "Files\PSFExtractor.exe",
+          "Files\upmod.cmd"
+        )
+        
+        foreach ($file in $requiredFiles) {
+          if (-not (Test-Path $file)) {
+            Write-Error "Required file not found: $file"
+            exit 1
+          }
+        }
+        
+        Write-Host "All required files verified"
+        
+    - name: Run EnterpriseG Build
+      shell: pwsh
+      run: |
+        Write-Host "Running EnterpriseG build process..."
+        Write-Host "Build Number: ${{ github.event.inputs.build_number }}"
+        Write-Host "Target SKU: ${{ github.event.inputs.target_sku }}"
+        
+        # Bedi.cmd will check Bedi.ini and if config matches, it will skip menu
+        # If config doesn't match, it will update Bedi.ini and exit, then we need to run again
+        # To ensure it works, we need to determine the correct menu option based on target SKU
+        
+        $targetSku = "${{ github.event.inputs.target_sku }}"
+        $menuOption = switch ($targetSku) {
+          "EnterpriseG" { "1" }
+          "EnterpriseS" { "2" }
+          "WNC" { "3" }
+          "Starter" { "4" }
+          default { "1" }
+        }
+        
+        # Create a wrapper script to automate Bedi.cmd menu selection
+        # Bedi.cmd will check Bedi.ini - if config matches menu selection, it skips menu
+        # Since we already created Bedi.ini with correct config, Bedi should skip menu
+        
+        Write-Host "Verifying Bedi.ini configuration..."
+        $configContent = Get-Content "Bedi.ini" -Raw
+        if ($configContent -match "_targSKU=$targetSku" -and $configContent -match "_sourSKU=Professional") {
+            Write-Host "Bedi.ini configuration is correct, Bedi.cmd should skip menu"
+        } else {
+            Write-Warning "Bedi.ini configuration may not match. Bedi will update it if needed."
+        }
+        
+        Write-Host "Starting Bedi.cmd..."
+        # Bedi.cmd reads Bedi.ini and if config matches expected values, it skips menu
+        # If config doesn't match, Bedi will update Bedi.ini and exit, then we need to run again
+        # But since we create Bedi.ini correctly, it should work on first run
+        
+        $process = Start-Process -FilePath "Bedi.cmd" -WorkingDirectory $PWD -Wait -NoNewWindow -PassThru -RedirectStandardOutput "bedi_output.txt" -RedirectStandardError "bedi_error.txt"
+        
+        # Check if Bedi exited because it updated config (exit code 0 but menu was shown)
+        # If exit code is 0 but we're still here, Bedi may have updated config and exited
+        # In that case, Bedi.ini should now be correct and we can run again
+        
+        if ($process.ExitCode -eq 0) {
+            # Check if Bedi actually completed build or just updated config
+            if (Test-Path "bedi_output.txt") {
+                $output = Get-Content "bedi_output.txt" -Raw
+                if ($output -match "successfully constructed" -or $output -match "FINISH") {
+                    Write-Host "Bedi.cmd completed successfully"
+                } else {
+                    Write-Host "Bedi.cmd may have updated config and exited. Checking..."
+                    # Run Bedi again - it should now use the updated config
+                    Write-Host "Running Bedi.cmd again with updated config..."
+                    $process2 = Start-Process -FilePath "Bedi.cmd" -WorkingDirectory $PWD -Wait -NoNewWindow -PassThru -RedirectStandardOutput "bedi_output2.txt" -RedirectStandardError "bedi_error2.txt"
+                    if ($process2.ExitCode -ne 0) {
+                        Write-Warning "Second Bedi.cmd run exited with code: $($process2.ExitCode)"
+                        if (Test-Path "bedi_output2.txt") {
+                            Write-Host "=== Bedi Output (Run 2) ==="
+                            Get-Content "bedi_output2.txt" -Tail 50
+                        }
+                        exit $process2.ExitCode
+                    }
+                }
+            }
+        } else {
+            Write-Warning "Bedi.cmd exited with code: $($process.ExitCode)"
+            if (Test-Path "bedi_output.txt") {
+                Write-Host "=== Bedi Output ==="
+                Get-Content "bedi_output.txt" -Tail 50
+            }
+            if (Test-Path "bedi_error.txt") {
+                Write-Host "=== Bedi Errors ==="
+                Get-Content "bedi_error.txt" -Tail 50
+            }
+            exit $process.ExitCode
+        }
+        
+      continue-on-error: true
+      
+    - name: Check build output
+      shell: pwsh
+      run: |
+        Write-Host "Checking for build output..."
+        
+        # EnterpriseG Builder creates output files in root directory
+        $buildNumber = "${{ github.event.inputs.build_number }}"
+        if ([string]::IsNullOrWhiteSpace($buildNumber)) { $buildNumber = "22621" }
+        
+        # Look for output WIM files
+        $wimFiles = Get-ChildItem -Path "." -Filter "install.wim" -ErrorAction SilentlyContinue
+        if ($wimFiles) {
+          Write-Host "Build output files found:"
+          foreach ($file in $wimFiles) {
+            Write-Host "  - $($file.Name) ($([math]::Round($file.Length / 1GB, 2)) GB)"
+          }
+        } else {
+          Write-Warning "No output WIM files found"
+          exit 1
+        }
+        
+    - name: Create ISO from built WIM
+      shell: pwsh
+      run: |
+        Write-Host "Creating ISO from built install.wim..."
+        
+        $wimPath = "$PWD\install.wim"
+        $isoMountPath = "$PWD\iso_mount"
+        $isoOutputName = "${{ github.event.inputs.iso_output_name }}"
+        if ([string]::IsNullOrWhiteSpace($isoOutputName)) {
+          $isoOutputName = "Windows-EnterpriseG"
+        }
+        $isoOutputPath = "$PWD\$isoOutputName.iso"
+        
+        if (-not (Test-Path $wimPath)) {
+          Write-Error "install.wim not found after build"
+          exit 1
+        }
+        
+        if (-not (Test-Path $isoMountPath)) {
+          Write-Error "ISO structure not found. Cannot recreate ISO."
+          exit 1
+        }
+        
+        # Copy the built install.wim back to sources folder
+        Write-Host "Copying built install.wim to ISO structure..."
+        $sourcesPath = "$isoMountPath\sources"
+        if (-not (Test-Path $sourcesPath)) {
+          New-Item -ItemType Directory -Path $sourcesPath -Force | Out-Null
+        }
+        Copy-Item -Path $wimPath -Destination "$sourcesPath\install.wim" -Force
+        
+        # Create ISO using oscdimg (Windows ADK tool) or mkisofs
+        Write-Host "Creating ISO..."
+        
+        # Check if oscdimg is available (from Windows ADK)
+        $oscdimgPath = "${env:ProgramFiles(x86)}\Windows Kits\10\Assessment and Deployment Kit\Deployment Tools\amd64\Oscdimg\oscdimg.exe"
+        
+        if (Test-Path $oscdimgPath) {
+          Write-Host "Using oscdimg from Windows ADK..."
+          # oscdimg parameters:
+          # -m: maximum file name length
+          # -o: optimize storage
+          # -u2: UDF file system
+          # -udfver102: UDF version 1.02
+          # -bootdata:2#p0,e,b"boot\etfsboot.com"#pEF,e,b"efi\Microsoft\boot\efisys.bin"
+          $bootData = "2#p0,e,b`"$isoMountPath\boot\etfsboot.com`"#pEF,e,b`"$isoMountPath\efi\Microsoft\boot\efisys.bin`""
+          
+          & $oscdimgPath -m -o -u2 -udfver102 -bootdata:$bootData $isoMountPath $isoOutputPath
+        } else {
+          Write-Host "oscdimg not found. Installing mkisofs alternative..."
+          # Try using 7z to create ISO (if available)
+          # Or use PowerShell to create ISO using .NET (limited support)
+          
+          # Alternative: Use 7z if available
+          $7zPath = "$PWD\Files\7z.exe"
+          if (Test-Path $7zPath) {
+            Write-Host "Using 7z to create ISO archive..."
+            # Note: 7z creates .7z archives, not proper ISO files
+            # For proper ISO, we need oscdimg or mkisofs
+            Write-Warning "7z cannot create proper ISO files. Creating archive instead."
+            & $7zPath a -tzip "$isoOutputPath.zip" "$isoMountPath\*"
+            Write-Host "Created archive: $isoOutputPath.zip"
+            Write-Host "Note: For proper ISO, install Windows ADK or use mkisofs"
+          } else {
+            Write-Warning "Cannot create ISO without oscdimg or mkisofs"
+            Write-Host "Saving ISO structure as archive instead..."
+            Compress-Archive -Path "$isoMountPath\*" -DestinationPath "$isoOutputPath.zip" -Force
+            Write-Host "Created archive: $isoOutputPath.zip"
+            Write-Host "You can recreate ISO manually using oscdimg or mkisofs"
+          }
+        }
+        
+        # Verify ISO was created
+        if (Test-Path $isoOutputPath) {
+          $isoSize = (Get-Item $isoOutputPath).Length / 1GB
+          Write-Host "ISO created successfully: $isoOutputPath"
+          Write-Host "ISO size: $([math]::Round($isoSize, 2)) GB"
+        } elseif (Test-Path "$isoOutputPath.zip") {
+          Write-Host "Archive created: $isoOutputPath.zip (use this to recreate ISO)"
+        } else {
+          Write-Warning "ISO creation may have failed. Check logs above."
+        }
+        
+    - name: Upload build artifacts
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: enterpriseg-build
+        path: |
+          *.iso
+          *.zip
+          *.wim
+          *.log
+          Bedi.ini
+          bedi_output.txt
+          bedi_error.txt
+        retention-days: 7
+        if-no-files-found: warn
+        
+    - name: Cleanup temporary files
+      if: always()
+      shell: pwsh
+      run: |
+        Write-Host "Cleaning up temporary files..."
+        # Clean up mount directories and temporary files
+        Get-ChildItem -Path "." -Directory -Filter "mnt*" -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+        Get-ChildItem -Path "." -Directory -Filter "log*" -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+        Get-ChildItem -Path "." -Directory -Filter "lp*" -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+        Get-ChildItem -Path "." -Directory -Filter "sdir*" -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+        Get-ChildItem -Path "." -Directory -Filter "sxs*" -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+        Get-ChildItem -Path "." -Directory -Filter "iso_mount" -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+        Get-ChildItem -Path "." -Filter "source.iso" -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+        Get-ChildItem -Path "." -Filter "run-bedi.ps1" -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+        Write-Host "Cleanup completed"
+

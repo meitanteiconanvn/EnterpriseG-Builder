@@ -324,12 +324,46 @@ jobs:
             Write-Warning "Bedi.ini configuration may not match. Bedi will update it if needed."
         }
         
-        Write-Host "Starting Bedi.cmd..."
-        # Bedi.cmd reads Bedi.ini and if config matches expected values, it skips menu
-        # If config doesn't match, Bedi will update Bedi.ini and exit, then we need to run again
-        # But since we create Bedi.ini correctly, it should work on first run
+        Write-Host "Starting Bedi.cmd in non-interactive mode..."
+        Write-Host ""
         
-        $process = Start-Process -FilePath "Bedi.cmd" -WorkingDirectory $PWD -Wait -NoNewWindow -PassThru -RedirectStandardOutput "bedi_output.txt" -RedirectStandardError "bedi_error.txt"
+        # Determine menu option based on target SKU
+        # Menu options: 1=EnterpriseG, 2=EnterpriseS, 3=WNC, 4=Starter
+        $menuOption = switch ($targetSku) {
+            "EnterpriseG" { "1" }
+            "EnterpriseS" { "2" }
+            "WNC" { "3" }
+            "Starter" { "4" }
+            default { "1" }
+        }
+        
+        Write-Host "Menu option for $targetSku: $menuOption"
+        
+        # Create a wrapper batch script that:
+        # 1. Pipes menu option number to Bedi.cmd for menu selection
+        # 2. Pipes "X" to Bedi.cmd for the Choice prompt at the end
+        # Note: Bedi.cmd will read Bedi.ini first, but if config doesn't match exactly,
+        # it will show menu and wait for input. We pipe the menu option to handle this.
+        $wrapperScript = @"
+@echo off
+REM Auto-answer menu selection and final Choice prompt
+(echo $menuOption & echo X) | Bedi.cmd
+exit /b %ERRORLEVEL%
+"@
+        
+        Set-Content -Path "run-bedi-auto.cmd" -Value $wrapperScript -Encoding ASCII
+        
+        # Bedi.cmd flow:
+        # 1. Calls :_MenuTarget which reads Bedi.ini if exists
+        # 2. Always shows menu (_disp) and waits for input
+        # 3. If config matches, it updates Bedi.ini (or skips if already matches) and exits
+        # 4. If config doesn't match, it updates Bedi.ini and exits
+        # 5. After menu, it continues with build process
+        # 6. At the end, shows Choice prompt - we pipe "X" to exit
+        
+        Write-Host "Executing Bedi.cmd with auto-answered prompts..."
+        Write-Host "Note: Menu option '$menuOption' will be auto-selected, and 'X' will be chosen at the end"
+        $process = Start-Process -FilePath "run-bedi-auto.cmd" -WorkingDirectory $PWD -Wait -NoNewWindow -PassThru -RedirectStandardOutput "bedi_output.txt" -RedirectStandardError "bedi_error.txt"
         
         # Check if Bedi exited because it updated config (exit code 0 but menu was shown)
         # If exit code is 0 but we're still here, Bedi may have updated config and exited
@@ -345,7 +379,7 @@ jobs:
                     Write-Host "Bedi.cmd may have updated config and exited. Checking..."
                     # Run Bedi again - it should now use the updated config
                     Write-Host "Running Bedi.cmd again with updated config..."
-                    $process2 = Start-Process -FilePath "Bedi.cmd" -WorkingDirectory $PWD -Wait -NoNewWindow -PassThru -RedirectStandardOutput "bedi_output2.txt" -RedirectStandardError "bedi_error2.txt"
+                    $process2 = Start-Process -FilePath "run-bedi-auto.cmd" -WorkingDirectory $PWD -Wait -NoNewWindow -PassThru -RedirectStandardOutput "bedi_output2.txt" -RedirectStandardError "bedi_error2.txt"
                     if ($process2.ExitCode -ne 0) {
                         Write-Warning "Second Bedi.cmd run exited with code: $($process2.ExitCode)"
                         if (Test-Path "bedi_output2.txt") {
@@ -504,6 +538,6 @@ jobs:
         Get-ChildItem -Path "." -Directory -Filter "sxs*" -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
         Get-ChildItem -Path "." -Directory -Filter "iso_mount" -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
         Get-ChildItem -Path "." -Filter "source.iso" -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
-        Get-ChildItem -Path "." -Filter "run-bedi.ps1" -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+                Get-ChildItem -Path "." -Filter "run-bedi-auto.cmd" -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
         Write-Host "Cleanup completed"
 

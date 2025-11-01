@@ -110,7 +110,6 @@ jobs:
           Write-Error "ISO was not downloaded successfully"
           exit 1
         }
-        
       env:
         ISO_URL: ${{ github.event.inputs.iso_url }}
         

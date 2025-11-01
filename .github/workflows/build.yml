@@ -343,12 +343,13 @@ jobs:
         # 2. Pipes "X" to Bedi.cmd for the Choice prompt at the end
         # Note: Bedi.cmd will read Bedi.ini first, but if config doesn't match exactly,
         # it will show menu and wait for input. We pipe the menu option to handle this.
-        $wrapperScript = @"
-@echo off
-REM Auto-answer menu selection and final Choice prompt
-(echo $menuOption & echo X) | Bedi.cmd
-exit /b %ERRORLEVEL%
-"@
+        $lines = @(
+          "@echo off",
+          "REM Auto-answer menu selection and final Choice prompt",
+          "(echo $menuOption & echo X) | Bedi.cmd",
+          "exit /b %ERRORLEVEL%"
+        )
+        $wrapperScript = $lines -join "`r`n"
         
         Set-Content -Path "run-bedi-auto.cmd" -Value $wrapperScript -Encoding ASCII
         

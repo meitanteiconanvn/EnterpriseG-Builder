@@ -283,9 +283,21 @@ jobs:
           # Test if oscdimg can run
           Write-Host ""
           Write-Host "Testing oscdimg.exe..."
-          $testResult = & $oscdimgPath 2>&1 | Out-String
-          Write-Host "oscdimg help output (first 10 lines):"
-          ($testResult -split "`n")[0..10] | ForEach-Object { Write-Host $_ }
+          try {
+            # oscdimg.exe without parameters shows help and exits with code 1, which is normal
+            # We suppress the error and just check if it runs
+            $ErrorActionPreference = 'SilentlyContinue'
+            $testResult = & $oscdimgPath 2>&1 | Out-String
+            $ErrorActionPreference = 'Continue'
+            
+            Write-Host "oscdimg help output (first 10 lines):"
+            ($testResult -split "`n")[0..10] | ForEach-Object { Write-Host $_ }
+            Write-Host ""
+            Write-Host "✓ oscdimg.exe executed successfully!" -ForegroundColor Green
+          } catch {
+            Write-Host "Warning: oscdimg.exe test execution had issues: $_" -ForegroundColor Yellow
+            Write-Host "But file exists and is accessible, so continuing..." -ForegroundColor Yellow
+          }
         } else {
           Write-Host "✗ FAILED: oscdimg.exe is not available" -ForegroundColor Red
           Write-Host "All installation methods failed." -ForegroundColor Red

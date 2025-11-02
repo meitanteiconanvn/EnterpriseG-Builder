@@ -289,7 +289,6 @@ jobs:
                   
                   # Update every 0.5 seconds for small file
                   if ($elapsed -ge 0.5) {
-                    $chunkSize = $downloadedSize - ($downloadedSize - $bytesRead)
                     $speed = if ($elapsed -gt 0) { ($downloadedSize / $elapsed) } else { 0 }
                     $speedKBps = $speed / 1KB
                     

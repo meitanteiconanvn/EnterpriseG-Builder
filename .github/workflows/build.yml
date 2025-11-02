@@ -264,14 +264,27 @@ jobs:
               
               # Step 1: Download ADK components to a folder (don't install yet)
               # /layout: download only
+              # /features: specify which features to download (we only need Deployment Tools)
               # /quiet: silent mode
+              # /norestart: don't restart
               $downloadFolder = "$PWD\adk_download"
               New-Item -ItemType Directory -Path $downloadFolder -Force | Out-Null
               
-              $downloadArgs = "/layout `"$downloadFolder`" /quiet /norestart"
+              # Try with /features parameter first (more specific)
+              $downloadArgs = "/layout `"$downloadFolder`" /features OptionId.DeploymentTools /quiet /norestart"
+              Write-Host "Running: $adkInstaller $downloadArgs"
+              
               $process = Start-Process -FilePath $adkInstaller -ArgumentList $downloadArgs -Wait -PassThru -NoNewWindow
               
               Write-Host "ADK download process exited with code: $($process.ExitCode)"
+              
+              # If feature-specific download failed, try without features parameter
+              if ($process.ExitCode -ne 0 -and $process.ExitCode -ne 3010) {
+                Write-Host "Feature-specific download failed. Trying without features parameter..."
+                $downloadArgs = "/layout `"$downloadFolder`" /quiet /norestart"
+                $process = Start-Process -FilePath $adkInstaller -ArgumentList $downloadArgs -Wait -PassThru -NoNewWindow
+                Write-Host "ADK download process (retry) exited with code: $($process.ExitCode)"
+              }
               
               if ($process.ExitCode -eq 0 -or $process.ExitCode -eq 3010) {
                 Write-Host "ADK components downloaded. Looking for oscdimg MSI installer..."
@@ -304,15 +317,32 @@ jobs:
                 
                 if ($oscImgMsi -and (Test-Path $oscImgMsi)) {
                   Write-Host "Installing oscdimg component from MSI..."
-                  # Install MSI silently
+                  # Install MSI silently with elevation if needed
+                  # /i: install
                   # /quiet: silent installation
                   # /norestart: don't restart
-                  $msiArgs = "/i `"$oscImgMsi`" /quiet /norestart"
-                  $msiProcess = Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -PassThru -NoNewWindow
+                  # /l*v: verbose logging
+                  $msiLog = "$PWD\oscdimg_msi_install.log"
+                  $msiArgs = "/i `"$oscImgMsi`" /quiet /norestart /l*v `"$msiLog`""
+                  Write-Host "Running: msiexec.exe $msiArgs"
+                  
+                  $msiProcess = Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -PassThru -NoNewWindow -Verb RunAs -ErrorAction SilentlyContinue
+                  
+                  # If RunAs failed, try without elevation (GitHub Actions runners usually have admin)
+                  if (-not $msiProcess) {
+                    Write-Host "RunAs failed, trying without elevation..."
+                    $msiProcess = Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -PassThru -NoNewWindow
+                  }
                   
                   Write-Host "oscdimg MSI installation exited with code: $($msiProcess.ExitCode)"
                   
-                  if ($msiProcess.ExitCode -eq 0) {
+                  # Check MSI log for details
+                  if (Test-Path $msiLog) {
+                    Write-Host "MSI installation log (last 20 lines):"
+                    Get-Content $msiLog -Tail 20 | ForEach-Object { Write-Host $_ }
+                  }
+                  
+                  if ($msiProcess.ExitCode -eq 0 -or $msiProcess.ExitCode -eq 3010) {
                     Write-Host "Waiting for oscdimg to be available..."
                     Start-Sleep -Seconds 10
                     

@@ -148,6 +148,109 @@ jobs:
       env:
         ISO_URL: ${{ github.event.inputs.iso_url }}
         
+    - name: Setup ISO creation tools
+      shell: pwsh
+      run: |
+        Write-Host "Setting up ISO creation tools..."
+        
+        # Check multiple common locations for oscdimg
+        $oscdimgPaths = @(
+          "${env:ProgramFiles(x86)}\Windows Kits\10\Assessment and Deployment Kit\Deployment Tools\amd64\Oscdimg\oscdimg.exe",
+          "${env:ProgramFiles}\Windows Kits\10\Assessment and Deployment Kit\Deployment Tools\amd64\Oscdimg\oscdimg.exe",
+          "${env:ProgramFiles(x86)}\Windows Kits\10\Assessment and Deployment Kit\Deployment Tools\x86\Oscdimg\oscdimg.exe"
+        )
+        
+        $oscdimgFound = $false
+        $oscdimgPath = $null
+        
+        foreach ($path in $oscdimgPaths) {
+          if (Test-Path $path) {
+            $oscdimgPath = $path
+            $oscdimgFound = $true
+            Write-Host "Found oscdimg at: $path"
+            break
+          }
+        }
+        
+        if (-not $oscdimgFound) {
+          Write-Host "oscdimg not found. Attempting to download oscdimg..."
+          
+          # Try downloading oscdimg standalone first (faster than full ADK)
+          # Alternative: Use Chocolatey if available
+          $chocoAvailable = Get-Command choco -ErrorAction SilentlyContinue
+          
+          if ($chocoAvailable) {
+            Write-Host "Using Chocolatey to install Windows ADK Deployment Tools..."
+            try {
+              choco install windows-adk-deployment-tools -y --no-progress
+              Start-Sleep -Seconds 10 # Wait for installation
+              
+              # Check again
+              foreach ($path in $oscdimgPaths) {
+                if (Test-Path $path) {
+                  $oscdimgPath = $path
+                  $oscdimgFound = $true
+                  Write-Host "oscdimg installed via Chocolatey at: $path"
+                  break
+                }
+              }
+            } catch {
+              Write-Warning "Chocolatey installation failed: $_"
+            }
+          }
+          
+          # If still not found, try downloading Windows ADK installer (last resort)
+          if (-not $oscdimgFound) {
+            Write-Host "Downloading Windows ADK installer (this may take a while)..."
+            
+            # Download Windows ADK installer (minimal deployment tools)
+            $adkUrl = "https://go.microsoft.com/fwlink/?linkid=2249370"
+            $adkInstaller = "$PWD\adksetup.exe"
+            
+            try {
+              Write-Host "Downloading Windows ADK installer..."
+              Invoke-WebRequest -Uri $adkUrl -OutFile $adkInstaller -UseBasicParsing -TimeoutSec 600
+              
+              Write-Host "Installing Windows ADK Deployment Tools (silent install, may take 5-10 minutes)..."
+              # Install silently with only Deployment Tools component
+              $installArgs = "/quiet /norestart /features OptionId.DeploymentTools"
+              $process = Start-Process -FilePath $adkInstaller -ArgumentList $installArgs -Wait -PassThru -NoNewWindow
+              
+              if ($process.ExitCode -eq 0 -or $process.ExitCode -eq 3010) {
+                Write-Host "Windows ADK installed successfully"
+                
+                # Wait a bit for files to be available
+                Start-Sleep -Seconds 5
+                
+                # Check again for oscdimg
+                foreach ($path in $oscdimgPaths) {
+                  if (Test-Path $path) {
+                    $oscdimgPath = $path
+                    $oscdimgFound = $true
+                    Write-Host "oscdimg now available at: $path"
+                    break
+                  }
+                }
+              } else {
+                Write-Warning "Windows ADK installation exited with code: $($process.ExitCode)"
+              }
+              
+              # Clean up installer
+              Remove-Item $adkInstaller -Force -ErrorAction SilentlyContinue
+            } catch {
+              Write-Warning "Failed to download/install Windows ADK: $_"
+              Write-Host "Will fall back to ZIP archive creation"
+            }
+          }
+        }
+        
+        # Save oscdimg path to environment variable for later steps
+        if ($oscdimgFound) {
+          Write-Host "oscdimg_path=$oscdimgPath" | Out-File -FilePath "$env:GITHUB_ENV" -Encoding utf8 -Append
+        } else {
+          Write-Host "oscdimg_path=" | Out-File -FilePath "$env:GITHUB_ENV" -Encoding utf8 -Append
+        }
+        
     - name: Extract install.wim from ISO
       shell: pwsh
       run: |
@@ -550,10 +653,26 @@ jobs:
         # Create ISO using oscdimg (Windows ADK tool) or mkisofs
         Write-Host "Creating ISO..."
         
-        # Check if oscdimg is available (from Windows ADK)
-        $oscdimgPath = "${env:ProgramFiles(x86)}\Windows Kits\10\Assessment and Deployment Kit\Deployment Tools\amd64\Oscdimg\oscdimg.exe"
+        # Get oscdimg path from environment variable or check common locations
+        $oscdimgPath = $env:oscdimg_path
         
-        if (Test-Path $oscdimgPath) {
+        if ([string]::IsNullOrWhiteSpace($oscdimgPath)) {
+          # Check common locations as fallback
+          $oscdimgPaths = @(
+            "${env:ProgramFiles(x86)}\Windows Kits\10\Assessment and Deployment Kit\Deployment Tools\amd64\Oscdimg\oscdimg.exe",
+            "${env:ProgramFiles}\Windows Kits\10\Assessment and Deployment Kit\Deployment Tools\amd64\Oscdimg\oscdimg.exe",
+            "${env:ProgramFiles(x86)}\Windows Kits\10\Assessment and Deployment Kit\Deployment Tools\x86\Oscdimg\oscdimg.exe"
+          )
+          
+          foreach ($path in $oscdimgPaths) {
+            if (Test-Path $path) {
+              $oscdimgPath = $path
+              break
+            }
+          }
+        }
+        
+        if (-not [string]::IsNullOrWhiteSpace($oscdimgPath) -and (Test-Path $oscdimgPath)) {
           Write-Host "Using oscdimg from Windows ADK..."
           # oscdimg parameters (optimized):
           # -m: maximum file name length (ISO9660)

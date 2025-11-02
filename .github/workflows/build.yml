@@ -240,7 +240,7 @@ jobs:
           if (Test-Path $path) {
             $oscdimgPath = $path
             $oscdimgFound = $true
-            Write-Host "Found oscdimg at: $path"
+            Write-Host "✓ Found oscdimg at: $path" -ForegroundColor Green
             break
           }
         }
@@ -257,18 +257,85 @@ jobs:
             Write-Host "Downloading oscdimg.exe from Microsoft Symbol Server..."
             Write-Host "URL: $oscdimgUrl"
             
+            # Function to download with progress
+            function Download-OscdimgWithProgress {
+              param(
+                [string]$Url,
+                [string]$Destination
+              )
+              
+              $request = [System.Net.HttpWebRequest]::Create($Url)
+              $response = $request.GetResponse()
+              
+              $totalSize = $response.ContentLength
+              $stream = $response.GetResponseStream()
+              $fileStream = [System.IO.File]::Create($Destination)
+              
+              $buffer = New-Object byte[] 64KB
+              $downloadedSize = 0
+              $lastUpdate = Get-Date
+              $startTime = Get-Date
+              
+              try {
+                while ($true) {
+                  $bytesRead = $stream.Read($buffer, 0, $buffer.Length)
+                  if ($bytesRead -eq 0) { break }
+                  
+                  $fileStream.Write($buffer, 0, $bytesRead)
+                  $downloadedSize += $bytesRead
+                  
+                  $now = Get-Date
+                  $elapsed = ($now - $lastUpdate).TotalSeconds
+                  
+                  # Update every 0.5 seconds for small file
+                  if ($elapsed -ge 0.5) {
+                    $chunkSize = $downloadedSize - ($downloadedSize - $bytesRead)
+                    $speed = if ($elapsed -gt 0) { ($downloadedSize / $elapsed) } else { 0 }
+                    $speedKBps = $speed / 1KB
+                    
+                    if ($totalSize -gt 0) {
+                      $percent = [math]::Round(($downloadedSize / $totalSize) * 100, 1)
+                      $downloadedKB = [math]::Round($downloadedSize / 1KB, 1)
+                      $totalKB = [math]::Round($totalSize / 1KB, 1)
+                      $remaining = $totalSize - $downloadedSize
+                      $etaSeconds = if ($speed -gt 0) { [math]::Round($remaining / $speed) } else { 0 }
+                      $eta = [TimeSpan]::FromSeconds($etaSeconds)
+                      
+                      Write-Host "Progress: $percent% ($downloadedKB KB / $totalKB KB) | Speed: $([math]::Round($speedKBps, 1)) KB/s | ETA: $($eta.ToString('ss'))s" -NoNewline
+                      Write-Host "`r" -NoNewline
+                    } else {
+                      $downloadedKB = [math]::Round($downloadedSize / 1KB, 1)
+                      Write-Host "Downloaded: $downloadedKB KB | Speed: $([math]::Round($speedKBps, 1)) KB/s" -NoNewline
+                      Write-Host "`r" -NoNewline
+                    }
+                    
+                    $lastUpdate = $now
+                  }
+                }
+                
+                Write-Host "" # New line after progress
+                $totalTime = (Get-Date) - $startTime
+                $finalSizeKB = [math]::Round($downloadedSize / 1KB, 1)
+                $avgSpeedKBps = if ($totalTime.TotalSeconds -gt 0) { [math]::Round(($downloadedSize / $totalTime.TotalSeconds) / 1KB, 1) } else { 0 }
+                Write-Host "✓ Download completed: $finalSizeKB KB in $($totalTime.TotalSeconds.ToString('F1'))s | Average speed: $avgSpeedKBps KB/s" -ForegroundColor Green
+              } finally {
+                $fileStream.Close()
+                $stream.Close()
+                $response.Close()
+              }
+            }
+            
             $ProgressPreference = 'SilentlyContinue'
-            Invoke-WebRequest -Uri $oscdimgUrl -OutFile $localOscdimgPath -UseBasicParsing -ErrorAction Stop
+            Download-OscdimgWithProgress -Url $oscdimgUrl -Destination $localOscdimgPath
             
             if (Test-Path $localOscdimgPath) {
               $fileSize = (Get-Item $localOscdimgPath).Length / 1KB
-              Write-Host "✓ oscdimg.exe downloaded successfully ($([math]::Round($fileSize, 2)) KB)" -ForegroundColor Green
               
               # Verify it's a valid executable (should be > 100 KB)
               if ($fileSize -gt 100) {
                 $oscdimgPath = $localOscdimgPath
                 $oscdimgFound = $true
-                Write-Host "Using downloaded oscdimg.exe: $oscdimgPath"
+                Write-Host "✓ Using downloaded oscdimg.exe: $oscdimgPath" -ForegroundColor Green
               } else {
                 Write-Warning "Downloaded file seems too small ($fileSize KB), might be invalid"
                 Remove-Item $localOscdimgPath -Force -ErrorAction SilentlyContinue

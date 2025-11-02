@@ -837,26 +837,91 @@ jobs:
             Write-Warning "oscdimg exited with code $LASTEXITCODE. ISO may not be bootable."
           }
         } else {
-          Write-Host "oscdimg not found. Installing mkisofs alternative..."
-          # Try using 7z to create ISO (if available)
-          # Or use PowerShell to create ISO using .NET (limited support)
+          Write-Host "oscdimg not found. Trying alternative methods..."
           
-          # Alternative: Use 7z if available
-          $7zPath = "$PWD\Files\7z.exe"
-          if (Test-Path $7zPath) {
-            Write-Host "Using 7z to create ISO archive..."
-            # Note: 7z creates .7z archives, not proper ISO files
-            # For proper ISO, we need oscdimg or mkisofs
-            Write-Warning "7z cannot create proper ISO files. Creating archive instead."
-            & $7zPath a -tzip "$isoOutputPath.zip" "$isoMountPath\*"
-            Write-Host "Created archive: $isoOutputPath.zip"
+          # Try using WSL mkisofs as fallback
+          $wslAvailable = Get-Command wsl -ErrorAction SilentlyContinue
+          $mkisofsFound = $false
+          
+          if ($wslAvailable) {
+            Write-Host "Attempting to use WSL mkisofs..."
+            try {
+              # Check if mkisofs exists
+              $mkisofsCheck = wsl which mkisofs 2>&1
+              if ($mkisofsCheck -match "mkisofs") {
+                $mkisofsFound = $true
+                Write-Host "mkisofs found in WSL, attempting to create ISO..."
+                
+                # Convert Windows path to WSL path
+                $wslPath = wsl wslpath -a "$isoMountPath" 2>&1
+                $wslOutput = wsl wslpath -a "$isoOutputPath" 2>&1
+                
+                # Create ISO using mkisofs
+                # -r: Rock Ridge extensions (for long filenames)
+                # -J: Joliet extensions (for Windows compatibility)
+                # -o: output file
+                # -V: volume label
+                $mkisofsCmd = "mkisofs -r -J -o `"$wslOutput`" -V Windows `"$wslPath`""
+                $mkisofsResult = wsl bash -c $mkisofsCmd 2>&1
+                
+                if (Test-Path $isoOutputPath) {
+                  $isoSize = (Get-Item $isoOutputPath).Length / 1GB
+                  Write-Host "ISO created successfully using mkisofs: $isoOutputPath"
+                  Write-Host "ISO size: $([math]::Round($isoSize, 2)) GB"
+                } else {
+                  Write-Warning "mkisofs command executed but ISO not found: $mkisofsResult"
+                  $mkisofsFound = $false
+                }
+              } else {
+                Write-Host "mkisofs not found in WSL, attempting to install..."
+                # Try to install genisoimage (provides mkisofs)
+                $installResult = wsl sudo apt-get update -qq 2>&1
+                $installResult2 = wsl sudo apt-get install -y genisoimage 2>&1
+                
+                # Check again
+                $mkisofsCheck2 = wsl which mkisofs 2>&1
+                if ($mkisofsCheck2 -match "mkisofs") {
+                  Write-Host "mkisofs installed successfully, creating ISO..."
+                  $wslPath = wsl wslpath -a "$isoMountPath" 2>&1
+                  $wslOutput = wsl wslpath -a "$isoOutputPath" 2>&1
+                  $mkisofsCmd = "mkisofs -r -J -o `"$wslOutput`" -V Windows `"$wslPath`""
+                  $mkisofsResult = wsl bash -c $mkisofsCmd 2>&1
+                  
+                  if (Test-Path $isoOutputPath) {
+                    $isoSize = (Get-Item $isoOutputPath).Length / 1GB
+                    Write-Host "ISO created successfully using mkisofs: $isoOutputPath"
+                    Write-Host "ISO size: $([math]::Round($isoSize, 2)) GB"
+                    $mkisofsFound = $true
+                  } else {
+                    Write-Warning "mkisofs failed: $mkisofsResult"
+                    $mkisofsFound = $false
+                  }
+                } else {
+                  Write-Warning "Failed to install mkisofs"
+                  $mkisofsFound = $false
+                }
+              }
+            } catch {
+              Write-Warning "WSL mkisofs method failed: $_"
+              $mkisofsFound = $false
+            }
+          }
+          
+          # If mkisofs also failed, fall back to ZIP
+          if (-not $mkisofsFound) {
+            Write-Host "All ISO creation methods failed. Creating ZIP archive instead..."
+            # Use 7z if available
+            $7zPath = "$PWD\Files\7z.exe"
+            if (Test-Path $7zPath) {
+              Write-Host "Using 7z to create archive..."
+              & $7zPath a -tzip "$isoOutputPath.zip" "$isoMountPath\*"
+              Write-Host "Created archive: $isoOutputPath.zip"
+            } else {
+              Write-Host "Using PowerShell Compress-Archive..."
+              Compress-Archive -Path "$isoMountPath\*" -DestinationPath "$isoOutputPath.zip" -Force
+              Write-Host "Created archive: $isoOutputPath.zip"
+            }
             Write-Host "Note: For proper ISO, install Windows ADK or use mkisofs"
-          } else {
-            Write-Warning "Cannot create ISO without oscdimg or mkisofs"
-            Write-Host "Saving ISO structure as archive instead..."
-            Compress-Archive -Path "$isoMountPath\*" -DestinationPath "$isoOutputPath.zip" -Force
-            Write-Host "Created archive: $isoOutputPath.zip"
-            Write-Host "You can recreate ISO manually using oscdimg or mkisofs"
           }
         }
         

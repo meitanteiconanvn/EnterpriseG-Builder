@@ -336,6 +336,7 @@ jobs:
           $lines = $wimInfo -split "`n"
           $currentIndex = 0
           $proIndex = $null
+          $proIndexExact = $null  # Exact match for "Edition ID: Professional"
           
           foreach ($line in $lines) {
             # Detect build number from version string
@@ -347,14 +348,32 @@ jobs:
               }
             }
             
-            # Find Professional edition index
+            # Find Professional edition index - prioritize exact match
             if ($line -match "Index:\s+(\d+)") {
               $currentIndex = [int]$matches[1]
             }
-            if ($line -match "Edition ID:\s+Professional" -or $line -match "Name:\s+.*Professional") {
-              $proIndex = $currentIndex
-              Write-Host "Found Professional edition at index: $proIndex"
+            
+            # First, look for exact match "Edition ID: Professional" (not ProfessionalN, ProfessionalEducation, etc.)
+            if ($line -match "Edition ID:\s+Professional$" -or $line -match "Edition ID:\s+Professional\s*$") {
+              $proIndexExact = $currentIndex
+              Write-Host "Found exact Professional edition at index: $proIndexExact"
             }
+            
+            # Fallback: if no exact match, use first Professional variant
+            if (-not $proIndexExact -and ($line -match "Edition ID:\s+Professional" -or $line -match "Name:\s+.*Professional")) {
+              if (-not $proIndex) {
+                $proIndex = $currentIndex
+                Write-Host "Found Professional variant at index: $proIndex"
+              }
+            }
+          }
+          
+          # Use exact match if found, otherwise use first variant found
+          if ($proIndexExact) {
+            $proIndex = $proIndexExact
+            Write-Host "Using exact Professional edition (index $proIndex)"
+          } elseif ($proIndex) {
+            Write-Host "Using Professional variant (index $proIndex)"
           }
           
           # Save build number to file for later steps

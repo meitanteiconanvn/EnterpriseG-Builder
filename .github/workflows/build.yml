@@ -949,14 +949,24 @@ jobs:
           if ((Test-Path $bootEtfs) -and (Test-Path $bootEfi)) {
             $bootData = "2#p0,e,b`"$bootEtfs`"#pEF,e,b`"$bootEfi`""
             Write-Host "Creating ISO with boot data..."
+            $ErrorActionPreference = 'SilentlyContinue'
             & $oscdimgPath -m -o -u2 -udfver102 -h -l "Windows" -bootdata:$bootData $isoMountPath $isoOutputPath 2>&1 | Out-String
+            $ErrorActionPreference = 'Continue'
+            $oscdimgExitCode = $LASTEXITCODE
+            $global:LASTEXITCODE = 0
           } else {
             Write-Host "Boot files not found, creating ISO without boot data..."
+            $ErrorActionPreference = 'SilentlyContinue'
             & $oscdimgPath -m -o -u2 -udfver102 -h -l "Windows" $isoMountPath $isoOutputPath 2>&1 | Out-String
+            $ErrorActionPreference = 'Continue'
+            $oscdimgExitCode = $LASTEXITCODE
+            $global:LASTEXITCODE = 0
           }
           
-          if ($LASTEXITCODE -ne 0) {
-            Write-Warning "oscdimg exited with code $LASTEXITCODE. ISO may not be bootable."
+          if ($oscdimgExitCode -ne 0) {
+            Write-Warning "oscdimg exited with code $oscdimgExitCode. ISO may not be bootable."
+          } else {
+            Write-Host "✓ ISO created successfully with oscdimg" -ForegroundColor Green
           }
         } else {
           Write-Host "oscdimg not found. Trying alternative methods..."

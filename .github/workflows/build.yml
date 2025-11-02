@@ -243,8 +243,29 @@ jobs:
             
             try {
               Write-Host "Downloading Windows ADK installer (this may take a while)..."
-              $downloadProgress = Invoke-WebRequest -Uri $adkUrl -OutFile $adkInstaller -UseBasicParsing -TimeoutSec 900 -PassThru
-              Write-Host "Downloaded: $($downloadProgress.StatusCode) - Size: $((Get-Item $adkInstaller).Length / 1MB) MB"
+              # Use -MaximumRedirectionCount to properly follow redirects
+              $ProgressPreference = 'SilentlyContinue'
+              $downloadProgress = Invoke-WebRequest -Uri $adkUrl -OutFile $adkInstaller -UseBasicParsing -TimeoutSec 900 -MaximumRedirectionCount 10 -PassThru
+              $fileSize = (Get-Item $adkInstaller).Length / 1MB
+              Write-Host "Downloaded: $($downloadProgress.StatusCode) - Size: $([math]::Round($fileSize, 2)) MB"
+              
+              # Check if download is actually an installer (should be > 1 MB)
+              if ($fileSize -lt 1) {
+                Write-Warning "Downloaded file seems too small ($fileSize MB), might be a redirect page. Retrying with different method..."
+                Remove-Item $adkInstaller -Force -ErrorAction SilentlyContinue
+                
+                # Try using WebClient which handles redirects automatically
+                $client = New-Object System.Net.WebClient
+                $client.DownloadFile($adkUrl, $adkInstaller)
+                $client.Dispose()
+                
+                $fileSize = (Get-Item $adkInstaller).Length / 1MB
+                Write-Host "Retry download size: $([math]::Round($fileSize, 2)) MB"
+                
+                if ($fileSize -lt 1) {
+                  throw "Downloaded file is too small, likely not the actual installer"
+                }
+              }
               
               Write-Host "Installing Windows ADK Deployment Tools (silent install, may take 5-10 minutes)..."
               # Install silently with only Deployment Tools component

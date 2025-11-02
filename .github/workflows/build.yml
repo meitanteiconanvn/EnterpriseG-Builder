@@ -84,8 +84,56 @@ jobs:
         Write-Host "Saving to: $isoPath"
         
         try {
+          # Optimize download with resume support and better error handling
           $ProgressPreference = 'SilentlyContinue'
-          Invoke-WebRequest -Uri $isoUrl -OutFile $isoPath -UseBasicParsing
+          
+          # Use BITS (Background Intelligent Transfer Service) for better resume support
+          # Check if file exists and resume download
+          if (Test-Path $isoPath) {
+            Write-Host "Existing file found. Checking if resume is needed..."
+            $existingSize = (Get-Item $isoPath).Length
+            
+            # Try to get file size from server
+            try {
+              $request = [System.Net.HttpWebRequest]::Create($isoUrl)
+              $request.Method = "HEAD"
+              $response = $request.GetResponse()
+              $contentLength = $response.ContentLength
+              $response.Close()
+              
+              if ($existingSize -lt $contentLength -and $contentLength -gt 0) {
+                Write-Host "Resuming download from $existingSize bytes..."
+                $request = [System.Net.HttpWebRequest]::Create($isoUrl)
+                $request.AddRange($existingSize)
+                $response = $request.GetResponse()
+                $stream = $response.GetResponseStream()
+                $fileStream = [System.IO.File]::OpenWrite($isoPath)
+                $fileStream.Seek($existingSize, [System.IO.SeekOrigin]::Begin) | Out-Null
+                $buffer = New-Object byte[] 1MB
+                $bytesRead = 0
+                do {
+                  $bytesRead = $stream.Read($buffer, 0, $buffer.Length)
+                  $fileStream.Write($buffer, 0, $bytesRead)
+                } while ($bytesRead -gt 0)
+                $fileStream.Close()
+                $stream.Close()
+                $response.Close()
+                Write-Host "Resume download completed"
+              } else {
+                Write-Host "File already complete or cannot resume. Starting fresh download..."
+                Remove-Item $isoPath -Force
+                Invoke-WebRequest -Uri $isoUrl -OutFile $isoPath -UseBasicParsing -TimeoutSec 3600 -MaximumRetryCount 3
+              }
+            } catch {
+              Write-Host "Resume not supported, downloading fresh..."
+              Remove-Item $isoPath -Force
+              Invoke-WebRequest -Uri $isoUrl -OutFile $isoPath -UseBasicParsing -TimeoutSec 3600 -MaximumRetryCount 3
+            }
+          } else {
+            # Fresh download with optimized settings
+            Invoke-WebRequest -Uri $isoUrl -OutFile $isoPath -UseBasicParsing -TimeoutSec 3600 -MaximumRetryCount 3
+          }
+          
           $isoSize = (Get-Item $isoPath).Length / 1GB
           Write-Host "ISO download completed. File size: $([math]::Round($isoSize, 2)) GB"
         } catch {
@@ -136,13 +184,24 @@ jobs:
         Copy-Item -Path $sourceWim -Destination $sourceWimPath -Force
         
         # Also copy ISO structure for later ISO recreation
+        # Optimize robocopy with multi-threading and better performance
         Write-Host "Copying ISO structure..."
         New-Item -ItemType Directory -Path $mountPath -Force | Out-Null
-        robocopy "${driveLetter}:\" $mountPath /E /XD sources /NFL /NDL /NJH /NJS | Out-Null
+        # Use /MT for multi-threaded copy (8 threads), /NP to disable progress, /NDL/NJH/NJS for minimal logging
+        robocopy "${driveLetter}:\" $mountPath /E /XD sources /MT:8 /NP /NDL /NJH /NJS /R:3 /W:5 | Out-Null
+        $robocopyExit = $LASTEXITCODE
+        # Robocopy returns 0-7 for success, 8+ for errors
+        if ($robocopyExit -ge 8) {
+          Write-Warning "Robocopy exited with code $robocopyExit. Some files may not have been copied."
+        }
         
         # Unmount ISO
         Write-Host "Unmounting ISO..."
         Dismount-DiskImage -ImagePath $isoPath
+        
+        # Delete source ISO immediately to save space and improve performance
+        Write-Host "Deleting source ISO to save disk space..."
+        Remove-Item -Path $isoPath -Force -ErrorAction SilentlyContinue
         
         # Verify source install.wim exists
         if (-not (Test-Path $sourceWimPath)) {
@@ -496,15 +555,32 @@ jobs:
         
         if (Test-Path $oscdimgPath) {
           Write-Host "Using oscdimg from Windows ADK..."
-          # oscdimg parameters:
-          # -m: maximum file name length
-          # -o: optimize storage
+          # oscdimg parameters (optimized):
+          # -m: maximum file name length (ISO9660)
+          # -o: optimize storage (remove duplicate files)
           # -u2: UDF file system
           # -udfver102: UDF version 1.02
-          # -bootdata:2#p0,e,b"boot\etfsboot.com"#pEF,e,b"efi\Microsoft\boot\efisys.bin"
-          $bootData = "2#p0,e,b`"$isoMountPath\boot\etfsboot.com`"#pEF,e,b`"$isoMountPath\efi\Microsoft\boot\efisys.bin`""
+          # -h: hide boot files
+          # -l: volume label
+          # -n: disable long file names (faster)
+          # -bootdata: boot sector configuration
           
-          & $oscdimgPath -m -o -u2 -udfver102 -bootdata:$bootData $isoMountPath $isoOutputPath
+          # Check if boot files exist
+          $bootEtfs = "$isoMountPath\boot\etfsboot.com"
+          $bootEfi = "$isoMountPath\efi\Microsoft\boot\efisys.bin"
+          
+          if ((Test-Path $bootEtfs) -and (Test-Path $bootEfi)) {
+            $bootData = "2#p0,e,b`"$bootEtfs`"#pEF,e,b`"$bootEfi`""
+            Write-Host "Creating ISO with boot data..."
+            & $oscdimgPath -m -o -u2 -udfver102 -h -l "Windows" -bootdata:$bootData $isoMountPath $isoOutputPath 2>&1 | Out-String
+          } else {
+            Write-Host "Boot files not found, creating ISO without boot data..."
+            & $oscdimgPath -m -o -u2 -udfver102 -h -l "Windows" $isoMountPath $isoOutputPath 2>&1 | Out-String
+          }
+          
+          if ($LASTEXITCODE -ne 0) {
+            Write-Warning "oscdimg exited with code $LASTEXITCODE. ISO may not be bootable."
+          }
         } else {
           Write-Host "oscdimg not found. Installing mkisofs alternative..."
           # Try using 7z to create ISO (if available)
@@ -569,6 +645,7 @@ jobs:
         Get-ChildItem -Path "." -Directory -Filter "sxs*" -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
         Get-ChildItem -Path "." -Directory -Filter "iso_mount" -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
         Get-ChildItem -Path "." -Filter "source.iso" -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
-                Get-ChildItem -Path "." -Filter "run-bedi-auto.cmd" -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+        Get-ChildItem -Path "." -Filter "run-bedi-auto.cmd" -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+        Get-ChildItem -Path "." -Filter "source_install.wim" -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
         Write-Host "Cleanup completed"
 

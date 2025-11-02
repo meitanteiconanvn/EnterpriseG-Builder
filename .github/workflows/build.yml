@@ -173,25 +173,59 @@ jobs:
         }
         
         if (-not $oscdimgFound) {
-          Write-Host "oscdimg not found. Attempting to download oscdimg..."
+          Write-Host "oscdimg not found. Attempting to install Windows ADK Deployment Tools..."
           
-          # Try downloading oscdimg standalone first (faster than full ADK)
-          # Alternative: Use Chocolatey if available
+          # Try Chocolatey first (fastest method)
           $chocoAvailable = Get-Command choco -ErrorAction SilentlyContinue
           
           if ($chocoAvailable) {
             Write-Host "Using Chocolatey to install Windows ADK Deployment Tools..."
             try {
-              choco install windows-adk-deployment-tools -y --no-progress
-              Start-Sleep -Seconds 10 # Wait for installation
+              # Install with verbose output
+              $chocoOutput = choco install windows-adk-deployment-tools -y --no-progress 2>&1 | Out-String
+              Write-Host "Chocolatey output: $chocoOutput"
               
-              # Check again
+              # Wait longer for installation to complete
+              Write-Host "Waiting for installation to complete..."
+              Start-Sleep -Seconds 30
+              
+              # Refresh environment variables (they might have changed)
+              $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+              
+              # Check again with expanded paths
+              $expandedPaths = @()
               foreach ($path in $oscdimgPaths) {
+                $expandedPaths += $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($path)
+              }
+              
+              foreach ($path in $expandedPaths) {
                 if (Test-Path $path) {
                   $oscdimgPath = $path
                   $oscdimgFound = $true
                   Write-Host "oscdimg installed via Chocolatey at: $path"
                   break
+                }
+              }
+              
+              # Also check Program Files directly
+              if (-not $oscdimgFound) {
+                $adkBasePaths = @(
+                  "${env:ProgramFiles(x86)}\Windows Kits\10\Assessment and Deployment Kit",
+                  "${env:ProgramFiles}\Windows Kits\10\Assessment and Deployment Kit"
+                )
+                
+                foreach ($adkBase in $adkBasePaths) {
+                  if (Test-Path $adkBase) {
+                    Write-Host "Found Windows ADK at: $adkBase"
+                    # Search recursively for oscdimg.exe
+                    $foundOscdimg = Get-ChildItem -Path $adkBase -Filter "oscdimg.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+                    if ($foundOscdimg) {
+                      $oscdimgPath = $foundOscdimg.FullName
+                      $oscdimgFound = $true
+                      Write-Host "Found oscdimg at: $oscdimgPath"
+                      break
+                    }
+                  }
                 }
               }
             } catch {
@@ -201,34 +235,65 @@ jobs:
           
           # If still not found, try downloading Windows ADK installer (last resort)
           if (-not $oscdimgFound) {
-            Write-Host "Downloading Windows ADK installer (this may take a while)..."
+            Write-Host "Chocolatey method failed or not available. Downloading Windows ADK installer..."
             
-            # Download Windows ADK installer (minimal deployment tools)
+            # Download Windows ADK installer (Windows 11 ADK - compatible with Windows Server 2025)
             $adkUrl = "https://go.microsoft.com/fwlink/?linkid=2249370"
             $adkInstaller = "$PWD\adksetup.exe"
             
             try {
-              Write-Host "Downloading Windows ADK installer..."
-              Invoke-WebRequest -Uri $adkUrl -OutFile $adkInstaller -UseBasicParsing -TimeoutSec 600
+              Write-Host "Downloading Windows ADK installer (this may take a while)..."
+              $downloadProgress = Invoke-WebRequest -Uri $adkUrl -OutFile $adkInstaller -UseBasicParsing -TimeoutSec 900 -PassThru
+              Write-Host "Downloaded: $($downloadProgress.StatusCode) - Size: $((Get-Item $adkInstaller).Length / 1MB) MB"
               
               Write-Host "Installing Windows ADK Deployment Tools (silent install, may take 5-10 minutes)..."
               # Install silently with only Deployment Tools component
+              # /quiet: silent mode
+              # /norestart: don't restart
+              # /features: install only Deployment Tools
               $installArgs = "/quiet /norestart /features OptionId.DeploymentTools"
               $process = Start-Process -FilePath $adkInstaller -ArgumentList $installArgs -Wait -PassThru -NoNewWindow
               
+              Write-Host "Windows ADK installer exited with code: $($process.ExitCode)"
+              # Exit codes: 0 = success, 3010 = success but reboot required
               if ($process.ExitCode -eq 0 -or $process.ExitCode -eq 3010) {
-                Write-Host "Windows ADK installed successfully"
+                Write-Host "Windows ADK installation completed. Waiting for files to be available..."
                 
-                # Wait a bit for files to be available
-                Start-Sleep -Seconds 5
+                # Wait longer for files to be available
+                Start-Sleep -Seconds 20
                 
-                # Check again for oscdimg
+                # Refresh environment variables
+                $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+                
+                # Check again for oscdimg with expanded search
                 foreach ($path in $oscdimgPaths) {
-                  if (Test-Path $path) {
-                    $oscdimgPath = $path
+                  $expandedPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($path)
+                  if (Test-Path $expandedPath) {
+                    $oscdimgPath = $expandedPath
                     $oscdimgFound = $true
-                    Write-Host "oscdimg now available at: $path"
+                    Write-Host "oscdimg now available at: $expandedPath"
                     break
+                  }
+                }
+                
+                # If still not found, search recursively
+                if (-not $oscdimgFound) {
+                  $adkBasePaths = @(
+                    "${env:ProgramFiles(x86)}\Windows Kits\10\Assessment and Deployment Kit",
+                    "${env:ProgramFiles}\Windows Kits\10\Assessment and Deployment Kit"
+                  )
+                  
+                  foreach ($adkBase in $adkBasePaths) {
+                    if (Test-Path $adkBase) {
+                      Write-Host "Searching for oscdimg.exe in: $adkBase"
+                      $foundOscdimg = Get-ChildItem -Path $adkBase -Filter "oscdimg.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+                      if ($foundOscdimg) {
+                        $oscdimgPath = $foundOscdimg.FullName
+                        $oscdimgFound = $true
+                        Write-Host "Found oscdimg at: $oscdimgPath"
+                        break
+                      }
+                    }
                   }
                 }
               } else {
@@ -239,6 +304,7 @@ jobs:
               Remove-Item $adkInstaller -Force -ErrorAction SilentlyContinue
             } catch {
               Write-Warning "Failed to download/install Windows ADK: $_"
+              Write-Host "Error details: $($_.Exception.Message)"
               Write-Host "Will fall back to ZIP archive creation"
             }
           }
@@ -675,7 +741,12 @@ jobs:
         # Get oscdimg path from environment variable or check common locations
         $oscdimgPath = $env:oscdimg_path
         
-        if ([string]::IsNullOrWhiteSpace($oscdimgPath)) {
+        Write-Host "Checking for oscdimg.exe..."
+        Write-Host "From environment variable: $oscdimgPath"
+        
+        if ([string]::IsNullOrWhiteSpace($oscdimgPath) -or -not (Test-Path $oscdimgPath)) {
+          Write-Host "oscdimg not found in environment variable. Checking common locations..."
+          
           # Check common locations as fallback
           $oscdimgPaths = @(
             "${env:ProgramFiles(x86)}\Windows Kits\10\Assessment and Deployment Kit\Deployment Tools\amd64\Oscdimg\oscdimg.exe",
@@ -684,14 +755,39 @@ jobs:
           )
           
           foreach ($path in $oscdimgPaths) {
+            Write-Host "Checking: $path"
             if (Test-Path $path) {
               $oscdimgPath = $path
+              Write-Host "Found oscdimg at: $path"
               break
+            }
+          }
+          
+          # If still not found, do recursive search
+          if ([string]::IsNullOrWhiteSpace($oscdimgPath)) {
+            Write-Host "oscdimg not found in common locations. Searching recursively..."
+            
+            $adkBasePaths = @(
+              "${env:ProgramFiles(x86)}\Windows Kits\10\Assessment and Deployment Kit",
+              "${env:ProgramFiles}\Windows Kits\10\Assessment and Deployment Kit"
+            )
+            
+            foreach ($adkBase in $adkBasePaths) {
+              if (Test-Path $adkBase) {
+                Write-Host "Searching in: $adkBase"
+                $foundOscdimg = Get-ChildItem -Path $adkBase -Filter "oscdimg.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+                if ($foundOscdimg) {
+                  $oscdimgPath = $foundOscdimg.FullName
+                  Write-Host "Found oscdimg recursively at: $oscdimgPath"
+                  break
+                }
+              }
             }
           }
         }
         
         if (-not [string]::IsNullOrWhiteSpace($oscdimgPath) -and (Test-Path $oscdimgPath)) {
+          Write-Host "Using oscdimg: $oscdimgPath"
           Write-Host "Using oscdimg from Windows ADK..."
           # oscdimg parameters (optimized):
           # -m: maximum file name length (ISO9660)

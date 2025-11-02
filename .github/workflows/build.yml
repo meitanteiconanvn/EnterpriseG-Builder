@@ -173,118 +173,159 @@ jobs:
         }
         
         if (-not $oscdimgFound) {
-          Write-Host "oscdimg not found. Attempting to install Windows ADK Deployment Tools..."
+          Write-Host "oscdimg not found. Attempting to download oscdimg.exe directly..."
           
-          # Try Chocolatey first (fastest method)
-          $chocoAvailable = Get-Command choco -ErrorAction SilentlyContinue
+          # Method 1: Download oscdimg.exe directly from Microsoft Symbol Server (simplest method)
+          # Reference: tiny11builder uses this method successfully
+          $localOscdimgPath = "$PWD\oscdimg.exe"
+          $oscdimgUrl = "https://msdl.microsoft.com/download/symbols/oscdimg.exe/3D44737265000/oscdimg.exe"
           
-          if ($chocoAvailable) {
-            Write-Host "Using Chocolatey to install Windows ADK Deployment Tools..."
-            try {
-              # Install with verbose output
-              $chocoOutput = choco install windows-adk-deployment-tools -y --no-progress 2>&1 | Out-String
-              Write-Host "Chocolatey output: $chocoOutput"
+          try {
+            Write-Host "Downloading oscdimg.exe from Microsoft Symbol Server..."
+            Write-Host "URL: $oscdimgUrl"
+            
+            $ProgressPreference = 'SilentlyContinue'
+            Invoke-WebRequest -Uri $oscdimgUrl -OutFile $localOscdimgPath -UseBasicParsing -ErrorAction Stop
+            
+            if (Test-Path $localOscdimgPath) {
+              $fileSize = (Get-Item $localOscdimgPath).Length / 1KB
+              Write-Host "✓ oscdimg.exe downloaded successfully ($([math]::Round($fileSize, 2)) KB)" -ForegroundColor Green
               
-              # Wait longer for installation to complete
-              Write-Host "Waiting for installation to complete..."
-              Start-Sleep -Seconds 30
-              
-              # Refresh environment variables (they might have changed)
-              $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-              
-              # Check again with expanded paths
-              $expandedPaths = @()
-              foreach ($path in $oscdimgPaths) {
-                $expandedPaths += $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($path)
+              # Verify it's a valid executable (should be > 100 KB)
+              if ($fileSize -gt 100) {
+                $oscdimgPath = $localOscdimgPath
+                $oscdimgFound = $true
+                Write-Host "Using downloaded oscdimg.exe: $oscdimgPath"
+              } else {
+                Write-Warning "Downloaded file seems too small ($fileSize KB), might be invalid"
+                Remove-Item $localOscdimgPath -Force -ErrorAction SilentlyContinue
               }
-              
-              foreach ($path in $expandedPaths) {
-                if (Test-Path $path) {
-                  $oscdimgPath = $path
-                  $oscdimgFound = $true
-                  Write-Host "oscdimg installed via Chocolatey at: $path"
-                  break
-                }
-              }
-              
-              # Also check Program Files directly
-              if (-not $oscdimgFound) {
-                $adkBasePaths = @(
-                  "${env:ProgramFiles(x86)}\Windows Kits\10\Assessment and Deployment Kit",
-                  "${env:ProgramFiles}\Windows Kits\10\Assessment and Deployment Kit"
-                )
+            }
+          } catch {
+            Write-Warning "Failed to download oscdimg.exe directly: $_"
+            Remove-Item $localOscdimgPath -Force -ErrorAction SilentlyContinue
+          }
+          
+          # Method 2: Try Chocolatey (if direct download failed)
+          if (-not $oscdimgFound) {
+            Write-Host "Direct download failed. Trying Chocolatey..."
+            $chocoAvailable = Get-Command choco -ErrorAction SilentlyContinue
+            
+            if ($chocoAvailable) {
+              Write-Host "Using Chocolatey to install Windows ADK Deployment Tools..."
+              try {
+                # Install with verbose output
+                $chocoOutput = choco install windows-adk-deployment-tools -y --no-progress 2>&1 | Out-String
+                Write-Host "Chocolatey output: $chocoOutput"
                 
-                foreach ($adkBase in $adkBasePaths) {
-                  if (Test-Path $adkBase) {
-                    Write-Host "Found Windows ADK at: $adkBase"
-                    # Search recursively for oscdimg.exe
-                    $foundOscdimg = Get-ChildItem -Path $adkBase -Filter "oscdimg.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-                    if ($foundOscdimg) {
-                      $oscdimgPath = $foundOscdimg.FullName
-                      $oscdimgFound = $true
-                      Write-Host "Found oscdimg at: $oscdimgPath"
-                      break
+                # Wait longer for installation to complete
+                Write-Host "Waiting for installation to complete..."
+                Start-Sleep -Seconds 30
+                
+                # Refresh environment variables (they might have changed)
+                $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+                
+                # Check again with expanded paths
+                $expandedPaths = @()
+                foreach ($path in $oscdimgPaths) {
+                  $expandedPaths += $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($path)
+                }
+                
+                foreach ($path in $expandedPaths) {
+                  if (Test-Path $path) {
+                    $oscdimgPath = $path
+                    $oscdimgFound = $true
+                    Write-Host "oscdimg installed via Chocolatey at: $path"
+                    break
+                  }
+                }
+                
+                # Also check Program Files directly
+                if (-not $oscdimgFound) {
+                  $adkBasePaths = @(
+                    "${env:ProgramFiles(x86)}\Windows Kits\10\Assessment and Deployment Kit",
+                    "${env:ProgramFiles}\Windows Kits\10\Assessment and Deployment Kit"
+                  )
+                  
+                  foreach ($adkBase in $adkBasePaths) {
+                    if (Test-Path $adkBase) {
+                      Write-Host "Found Windows ADK at: $adkBase"
+                      # Search recursively for oscdimg.exe
+                      $foundOscdimg = Get-ChildItem -Path $adkBase -Filter "oscdimg.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+                      if ($foundOscdimg) {
+                        $oscdimgPath = $foundOscdimg.FullName
+                        $oscdimgFound = $true
+                        Write-Host "Found oscdimg at: $oscdimgPath"
+                        break
+                      }
                     }
                   }
                 }
+              } catch {
+                Write-Warning "Chocolatey installation failed: $_"
               }
-            } catch {
-              Write-Warning "Chocolatey installation failed: $_"
             }
           }
           
-          # If Chocolatey failed, try downloading Windows ADK installer and installing oscdimg component
+          # Method 3: Try downloading Windows ADK installer and installing oscdimg component (if both above failed)
           if (-not $oscdimgFound) {
-            Write-Host "Chocolatey method failed or not available. Trying Windows ADK installer download..."
+            Write-Host "Chocolatey method failed or not available. Trying Windows ADK installer..."
             
-            # Use the correct Windows ADK download link
-            $adkUrl = "https://go.microsoft.com/fwlink/?linkid=2289980"
-            $adkInstaller = "$PWD\adksetup.exe"
+            # Check if adksetup.exe exists locally (in Files folder)
+            $localAdkInstaller = "$PWD\Files\adksetup.exe"
+            $adkInstaller = $null
             
-            try {
-              Write-Host "Downloading Windows ADK installer..."
-              $ProgressPreference = 'SilentlyContinue'
+            if (Test-Path $localAdkInstaller) {
+              Write-Host "Using local adksetup.exe from Files folder..."
+              $adkInstaller = $localAdkInstaller
+            } else {
+              Write-Host "Local adksetup.exe not found. Downloading Windows ADK installer..."
               
-              # Try using WebClient first (handles redirects better)
-              $client = New-Object System.Net.WebClient
-              $client.DownloadFile($adkUrl, $adkInstaller)
-              $client.Dispose()
+              # Use the correct Windows ADK download link
+              $adkUrl = "https://go.microsoft.com/fwlink/?linkid=2289980"
+              $adkInstaller = "$PWD\adksetup.exe"
               
-              $fileSize = (Get-Item $adkInstaller).Length / 1MB
-              Write-Host "Downloaded installer size: $([math]::Round($fileSize, 2)) MB"
-              
-              # Check if download is actually an installer (should be > 1 MB)
-              if ($fileSize -lt 1) {
-                Write-Warning "Downloaded file seems too small ($fileSize MB), might be a redirect page."
-                Remove-Item $adkInstaller -Force -ErrorAction SilentlyContinue
-                throw "Downloaded file is too small"
+              try {
+                $ProgressPreference = 'SilentlyContinue'
+                
+                # Try using WebClient first (handles redirects better)
+                $client = New-Object System.Net.WebClient
+                $client.DownloadFile($adkUrl, $adkInstaller)
+                $client.Dispose()
+                
+                $fileSize = (Get-Item $adkInstaller).Length / 1MB
+                Write-Host "Downloaded installer size: $([math]::Round($fileSize, 2)) MB"
+                
+                # Check if download is actually an installer (should be > 1 MB)
+                if ($fileSize -lt 1) {
+                  Write-Warning "Downloaded file seems too small ($fileSize MB), might be a redirect page."
+                  Remove-Item $adkInstaller -Force -ErrorAction SilentlyContinue
+                  throw "Downloaded file is too small"
+                }
+              } catch {
+                Write-Warning "Failed to download ADK installer: $_"
+                $adkInstaller = $null
               }
-              
-              Write-Host "Installing Windows ADK (download-only mode, then installing oscdimg component)..."
-              
-              # Step 1: Download ADK components to a folder (don't install yet)
-              # /layout: download only
-              # /features: specify which features to download (we only need Deployment Tools)
-              # /quiet: silent mode
-              # /norestart: don't restart
-              $downloadFolder = "$PWD\adk_download"
-              New-Item -ItemType Directory -Path $downloadFolder -Force | Out-Null
-              
-              # Try with /features parameter first (more specific)
-              $downloadArgs = "/layout `"$downloadFolder`" /features OptionId.DeploymentTools /quiet /norestart"
-              Write-Host "Running: $adkInstaller $downloadArgs"
-              
-              $process = Start-Process -FilePath $adkInstaller -ArgumentList $downloadArgs -Wait -PassThru -NoNewWindow
-              
-              Write-Host "ADK download process exited with code: $($process.ExitCode)"
-              
-              # If feature-specific download failed, try without features parameter
-              if ($process.ExitCode -ne 0 -and $process.ExitCode -ne 3010) {
-                Write-Host "Feature-specific download failed. Trying without features parameter..."
+            }
+            
+            if ($adkInstaller -and (Test-Path $adkInstaller)) {
+              try {
+                Write-Host "Installing Windows ADK (download-only mode, then installing oscdimg component)..."
+                
+                # Step 1: Download ADK components to a folder (don't install yet)
+                # /layout: download only
+                # /quiet: silent mode
+                # /norestart: don't restart
+                $downloadFolder = "$PWD\adk_download"
+                New-Item -ItemType Directory -Path $downloadFolder -Force | Out-Null
+                
+                # Try without features parameter first (more reliable)
                 $downloadArgs = "/layout `"$downloadFolder`" /quiet /norestart"
+                Write-Host "Running: $adkInstaller $downloadArgs"
+                
                 $process = Start-Process -FilePath $adkInstaller -ArgumentList $downloadArgs -Wait -PassThru -NoNewWindow
-                Write-Host "ADK download process (retry) exited with code: $($process.ExitCode)"
-              }
+                
+                Write-Host "ADK download process exited with code: $($process.ExitCode)"
               
               if ($process.ExitCode -eq 0 -or $process.ExitCode -eq 3010) {
                 Write-Host "ADK components downloaded. Looking for oscdimg MSI installer..."
@@ -317,24 +358,37 @@ jobs:
                 
                 if ($oscImgMsi -and (Test-Path $oscImgMsi)) {
                   Write-Host "Installing oscdimg component from MSI..."
-                  # Install MSI silently with elevation if needed
+                  # Install MSI silently
                   # /i: install
                   # /quiet: silent installation
                   # /norestart: don't restart
                   # /l*v: verbose logging
                   $msiLog = "$PWD\oscdimg_msi_install.log"
-                  $msiArgs = "/i `"$oscImgMsi`" /quiet /norestart /l*v `"$msiLog`""
-                  Write-Host "Running: msiexec.exe $msiArgs"
+                  $msiArgs = @(
+                    "/i",
+                    "`"$oscImgMsi`"",
+                    "/quiet",
+                    "/norestart",
+                    "/l*v",
+                    "`"$msiLog`""
+                  )
+                  Write-Host "Running: msiexec.exe $($msiArgs -join ' ')"
                   
-                  $msiProcess = Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -PassThru -NoNewWindow -Verb RunAs -ErrorAction SilentlyContinue
-                  
-                  # If RunAs failed, try without elevation (GitHub Actions runners usually have admin)
-                  if (-not $msiProcess) {
-                    Write-Host "RunAs failed, trying without elevation..."
-                    $msiProcess = Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -PassThru -NoNewWindow
+                  # GitHub Actions runners usually have admin, so try without RunAs first
+                  try {
+                    $msiProcess = Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -PassThru -NoNewWindow -ErrorAction Stop
+                    Write-Host "oscdimg MSI installation exited with code: $($msiProcess.ExitCode)"
+                  } catch {
+                    Write-Warning "Failed to install MSI: $_"
+                    Write-Host "Error details: $($_.Exception.Message)"
+                    $msiProcess = $null
                   }
                   
-                  Write-Host "oscdimg MSI installation exited with code: $($msiProcess.ExitCode)"
+                  if (-not $msiProcess) {
+                    Write-Host "MSI installation failed or was skipped"
+                    Write-Host "oscdimg MSI installation exited with code: -1"
+                    $msiProcess = New-Object PSObject -Property @{ ExitCode = -1 }
+                  }
                   
                   # Check MSI log for details
                   if (Test-Path $msiLog) {
@@ -387,8 +441,10 @@ jobs:
                 Write-Warning "ADK download process exited with code: $($process.ExitCode)"
               }
               
-              # Clean up installer
-              Remove-Item $adkInstaller -Force -ErrorAction SilentlyContinue
+              # Clean up installer only if it was downloaded (not if it's local)
+              if ($adkInstaller -like "*\adksetup.exe" -and $adkInstaller -notlike "*Files\adksetup.exe") {
+                Remove-Item $adkInstaller -Force -ErrorAction SilentlyContinue
+              }
             } catch {
               Write-Warning "Failed to download/install Windows ADK: $_"
               Write-Host "Error details: $($_.Exception.Message)"

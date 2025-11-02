@@ -233,101 +233,13 @@ jobs:
             }
           }
           
-          # If still not found, try downloading Windows ADK installer (last resort)
+          # If Chocolatey failed, note that Windows ADK installer download method doesn't work reliably
+          # Microsoft's download link redirects to a web page instead of the installer
+          # We'll skip direct download and rely on WSL mkisofs fallback in the ISO creation step
           if (-not $oscdimgFound) {
-            Write-Host "Chocolatey method failed or not available. Downloading Windows ADK installer..."
-            
-            # Download Windows ADK installer (Windows 11 ADK - compatible with Windows Server 2025)
-            $adkUrl = "https://go.microsoft.com/fwlink/?linkid=2249370"
-            $adkInstaller = "$PWD\adksetup.exe"
-            
-            try {
-              Write-Host "Downloading Windows ADK installer (this may take a while)..."
-              # Use -MaximumRedirectionCount to properly follow redirects
-              $ProgressPreference = 'SilentlyContinue'
-              $downloadProgress = Invoke-WebRequest -Uri $adkUrl -OutFile $adkInstaller -UseBasicParsing -TimeoutSec 900 -MaximumRedirectionCount 10 -PassThru
-              $fileSize = (Get-Item $adkInstaller).Length / 1MB
-              Write-Host "Downloaded: $($downloadProgress.StatusCode) - Size: $([math]::Round($fileSize, 2)) MB"
-              
-              # Check if download is actually an installer (should be > 1 MB)
-              if ($fileSize -lt 1) {
-                Write-Warning "Downloaded file seems too small ($fileSize MB), might be a redirect page. Retrying with different method..."
-                Remove-Item $adkInstaller -Force -ErrorAction SilentlyContinue
-                
-                # Try using WebClient which handles redirects automatically
-                $client = New-Object System.Net.WebClient
-                $client.DownloadFile($adkUrl, $adkInstaller)
-                $client.Dispose()
-                
-                $fileSize = (Get-Item $adkInstaller).Length / 1MB
-                Write-Host "Retry download size: $([math]::Round($fileSize, 2)) MB"
-                
-                if ($fileSize -lt 1) {
-                  throw "Downloaded file is too small, likely not the actual installer"
-                }
-              }
-              
-              Write-Host "Installing Windows ADK Deployment Tools (silent install, may take 5-10 minutes)..."
-              # Install silently with only Deployment Tools component
-              # /quiet: silent mode
-              # /norestart: don't restart
-              # /features: install only Deployment Tools
-              $installArgs = "/quiet /norestart /features OptionId.DeploymentTools"
-              $process = Start-Process -FilePath $adkInstaller -ArgumentList $installArgs -Wait -PassThru -NoNewWindow
-              
-              Write-Host "Windows ADK installer exited with code: $($process.ExitCode)"
-              # Exit codes: 0 = success, 3010 = success but reboot required
-              if ($process.ExitCode -eq 0 -or $process.ExitCode -eq 3010) {
-                Write-Host "Windows ADK installation completed. Waiting for files to be available..."
-                
-                # Wait longer for files to be available
-                Start-Sleep -Seconds 20
-                
-                # Refresh environment variables
-                $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-                
-                # Check again for oscdimg with expanded search
-                foreach ($path in $oscdimgPaths) {
-                  $expandedPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($path)
-                  if (Test-Path $expandedPath) {
-                    $oscdimgPath = $expandedPath
-                    $oscdimgFound = $true
-                    Write-Host "oscdimg now available at: $expandedPath"
-                    break
-                  }
-                }
-                
-                # If still not found, search recursively
-                if (-not $oscdimgFound) {
-                  $adkBasePaths = @(
-                    "${env:ProgramFiles(x86)}\Windows Kits\10\Assessment and Deployment Kit",
-                    "${env:ProgramFiles}\Windows Kits\10\Assessment and Deployment Kit"
-                  )
-                  
-                  foreach ($adkBase in $adkBasePaths) {
-                    if (Test-Path $adkBase) {
-                      Write-Host "Searching for oscdimg.exe in: $adkBase"
-                      $foundOscdimg = Get-ChildItem -Path $adkBase -Filter "oscdimg.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-                      if ($foundOscdimg) {
-                        $oscdimgPath = $foundOscdimg.FullName
-                        $oscdimgFound = $true
-                        Write-Host "Found oscdimg at: $oscdimgPath"
-                        break
-                      }
-                    }
-                  }
-                }
-              } else {
-                Write-Warning "Windows ADK installation exited with code: $($process.ExitCode)"
-              }
-              
-              # Clean up installer
-              Remove-Item $adkInstaller -Force -ErrorAction SilentlyContinue
-            } catch {
-              Write-Warning "Failed to download/install Windows ADK: $_"
-              Write-Host "Error details: $($_.Exception.Message)"
-              Write-Host "Will fall back to ZIP archive creation"
-            }
+            Write-Host "Chocolatey method failed or not available."
+            Write-Host "Note: Windows ADK installer download from Microsoft link is unreliable (redirects to web page)."
+            Write-Host "Will use WSL mkisofs as fallback for ISO creation if oscdimg is not found."
           }
         }
         

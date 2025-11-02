@@ -248,14 +248,58 @@ jobs:
         if (-not $oscdimgFound) {
           Write-Host "oscdimg not found. Attempting to download oscdimg.exe directly..."
           
-          # Method 1: Download oscdimg.exe directly from Microsoft Symbol Server (simplest method)
-          # Reference: tiny11builder uses this method successfully
+          # Method 1: Download oscdimg.exe directly using curl.exe (most efficient method)
           $localOscdimgPath = "$PWD\oscdimg.exe"
-          $oscdimgUrl = "https://msdl.microsoft.com/download/symbols/oscdimg.exe/3D44737265000/oscdimg.exe"
+          $oscdimgUrl = "https://msdl.microsoft.com/download/symbols/oscdimg.exe/688CABB065000/oscdimg.exe"
           
-          try {
-            Write-Host "Downloading oscdimg.exe from Microsoft Symbol Server..."
-            Write-Host "URL: $oscdimgUrl"
+          # Try curl.exe first (simpler and more efficient)
+          $curlAvailable = Get-Command curl.exe -ErrorAction SilentlyContinue
+          
+          if ($curlAvailable) {
+            try {
+              Write-Host "Downloading oscdimg.exe using curl.exe..."
+              Write-Host "URL: $oscdimgUrl"
+              
+              # Use curl with Microsoft Symbol Server User-Agent and follow redirects
+              $curlArgs = @(
+                "-L",
+                "-A", "Microsoft-Symbol-Server/10.0.0.0",
+                $oscdimgUrl,
+                "-o", $localOscdimgPath
+              )
+              
+              $curlProcess = Start-Process -FilePath "curl.exe" -ArgumentList $curlArgs -Wait -PassThru -NoNewWindow
+              
+              if ($curlProcess.ExitCode -eq 0 -and (Test-Path $localOscdimgPath)) {
+                $fileSize = (Get-Item $localOscdimgPath).Length / 1KB
+                Write-Host "✓ oscdimg.exe downloaded successfully using curl ($([math]::Round($fileSize, 2)) KB)" -ForegroundColor Green
+                
+                # Verify it's a valid executable (should be > 100 KB)
+                if ($fileSize -gt 100) {
+                  $oscdimgPath = $localOscdimgPath
+                  $oscdimgFound = $true
+                  Write-Host "✓ Using downloaded oscdimg.exe: $oscdimgPath" -ForegroundColor Green
+                } else {
+                  Write-Warning "Downloaded file seems too small ($fileSize KB), might be invalid"
+                  Remove-Item $localOscdimgPath -Force -ErrorAction SilentlyContinue
+                }
+              } else {
+                Write-Warning "curl.exe download failed with exit code: $($curlProcess.ExitCode)"
+                Remove-Item $localOscdimgPath -Force -ErrorAction SilentlyContinue
+              }
+            } catch {
+              Write-Warning "Failed to download oscdimg.exe using curl.exe: $_"
+              Remove-Item $localOscdimgPath -Force -ErrorAction SilentlyContinue
+            }
+          }
+          
+          # Method 1b: Fallback to PowerShell download with progress (if curl failed or not available)
+          if (-not $oscdimgFound) {
+            if (-not $curlAvailable) {
+              Write-Host "curl.exe not available. Using PowerShell download method..."
+            } else {
+              Write-Host "curl.exe download failed. Trying PowerShell download method..."
+            }
             
             # Function to download with progress
             function Download-OscdimgWithProgress {
@@ -324,28 +368,30 @@ jobs:
               }
             }
             
-            $ProgressPreference = 'SilentlyContinue'
-            Download-OscdimgWithProgress -Url $oscdimgUrl -Destination $localOscdimgPath
-            
-            if (Test-Path $localOscdimgPath) {
-              $fileSize = (Get-Item $localOscdimgPath).Length / 1KB
+            try {
+              $ProgressPreference = 'SilentlyContinue'
+              Download-OscdimgWithProgress -Url $oscdimgUrl -Destination $localOscdimgPath
               
-              # Verify it's a valid executable (should be > 100 KB)
-              if ($fileSize -gt 100) {
-                $oscdimgPath = $localOscdimgPath
-                $oscdimgFound = $true
-                Write-Host "✓ Using downloaded oscdimg.exe: $oscdimgPath" -ForegroundColor Green
-              } else {
-                Write-Warning "Downloaded file seems too small ($fileSize KB), might be invalid"
-                Remove-Item $localOscdimgPath -Force -ErrorAction SilentlyContinue
+              if (Test-Path $localOscdimgPath) {
+                $fileSize = (Get-Item $localOscdimgPath).Length / 1KB
+                
+                # Verify it's a valid executable (should be > 100 KB)
+                if ($fileSize -gt 100) {
+                  $oscdimgPath = $localOscdimgPath
+                  $oscdimgFound = $true
+                  Write-Host "✓ Using downloaded oscdimg.exe: $oscdimgPath" -ForegroundColor Green
+                } else {
+                  Write-Warning "Downloaded file seems too small ($fileSize KB), might be invalid"
+                  Remove-Item $localOscdimgPath -Force -ErrorAction SilentlyContinue
+                }
               }
+            } catch {
+              Write-Warning "Failed to download oscdimg.exe using PowerShell: $_"
+              Remove-Item $localOscdimgPath -Force -ErrorAction SilentlyContinue
             }
-          } catch {
-            Write-Warning "Failed to download oscdimg.exe directly: $_"
-            Remove-Item $localOscdimgPath -Force -ErrorAction SilentlyContinue
           }
           
-          # Method 2: Try Chocolatey (if direct download failed)
+          # Method 2: Try Chocolatey (if both download methods failed)
           if (-not $oscdimgFound) {
             Write-Host "Direct download failed. Trying Chocolatey..."
             $chocoAvailable = Get-Command choco -ErrorAction SilentlyContinue

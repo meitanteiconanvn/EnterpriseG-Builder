@@ -233,13 +233,137 @@ jobs:
             }
           }
           
-          # If Chocolatey failed, note that Windows ADK installer download method doesn't work reliably
-          # Microsoft's download link redirects to a web page instead of the installer
-          # We'll skip direct download and rely on WSL mkisofs fallback in the ISO creation step
+          # If Chocolatey failed, try downloading Windows ADK installer and installing oscdimg component
           if (-not $oscdimgFound) {
-            Write-Host "Chocolatey method failed or not available."
-            Write-Host "Note: Windows ADK installer download from Microsoft link is unreliable (redirects to web page)."
-            Write-Host "Will use WSL mkisofs as fallback for ISO creation if oscdimg is not found."
+            Write-Host "Chocolatey method failed or not available. Trying Windows ADK installer download..."
+            
+            # Use the correct Windows ADK download link
+            $adkUrl = "https://go.microsoft.com/fwlink/?linkid=2289980"
+            $adkInstaller = "$PWD\adksetup.exe"
+            
+            try {
+              Write-Host "Downloading Windows ADK installer..."
+              $ProgressPreference = 'SilentlyContinue'
+              
+              # Try using WebClient first (handles redirects better)
+              $client = New-Object System.Net.WebClient
+              $client.DownloadFile($adkUrl, $adkInstaller)
+              $client.Dispose()
+              
+              $fileSize = (Get-Item $adkInstaller).Length / 1MB
+              Write-Host "Downloaded installer size: $([math]::Round($fileSize, 2)) MB"
+              
+              # Check if download is actually an installer (should be > 1 MB)
+              if ($fileSize -lt 1) {
+                Write-Warning "Downloaded file seems too small ($fileSize MB), might be a redirect page."
+                Remove-Item $adkInstaller -Force -ErrorAction SilentlyContinue
+                throw "Downloaded file is too small"
+              }
+              
+              Write-Host "Installing Windows ADK (download-only mode, then installing oscdimg component)..."
+              
+              # Step 1: Download ADK components to a folder (don't install yet)
+              # /layout: download only
+              # /quiet: silent mode
+              $downloadFolder = "$PWD\adk_download"
+              New-Item -ItemType Directory -Path $downloadFolder -Force | Out-Null
+              
+              $downloadArgs = "/layout `"$downloadFolder`" /quiet /norestart"
+              $process = Start-Process -FilePath $adkInstaller -ArgumentList $downloadArgs -Wait -PassThru -NoNewWindow
+              
+              Write-Host "ADK download process exited with code: $($process.ExitCode)"
+              
+              if ($process.ExitCode -eq 0 -or $process.ExitCode -eq 3010) {
+                Write-Host "ADK components downloaded. Looking for oscdimg MSI installer..."
+                
+                # Look for oscdimg MSI installer in the downloaded folder
+                $oscImgMsiPaths = @(
+                  "$downloadFolder\Windows Kits\10\ADK\Installers\Oscdimg (DesktopEditions)-x86_en-us.msi",
+                  "$downloadFolder\Windows Kits\10\ADK\Installers\Oscdimg (DesktopEditions)-amd64_en-us.msi",
+                  "$downloadFolder\Windows Kits\10\ADK\Installers\Oscdimg*.msi"
+                )
+                
+                $oscImgMsi = $null
+                foreach ($msiPath in $oscImgMsiPaths) {
+                  $foundMsi = Get-ChildItem -Path $msiPath -ErrorAction SilentlyContinue | Select-Object -First 1
+                  if ($foundMsi) {
+                    $oscImgMsi = $foundMsi.FullName
+                    Write-Host "Found oscdimg MSI: $oscImgMsi"
+                    break
+                  }
+                }
+                
+                # Also search recursively
+                if (-not $oscImgMsi) {
+                  $foundMsi = Get-ChildItem -Path $downloadFolder -Filter "*Oscdimg*.msi" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+                  if ($foundMsi) {
+                    $oscImgMsi = $foundMsi.FullName
+                    Write-Host "Found oscdimg MSI (recursive search): $oscImgMsi"
+                  }
+                }
+                
+                if ($oscImgMsi -and (Test-Path $oscImgMsi)) {
+                  Write-Host "Installing oscdimg component from MSI..."
+                  # Install MSI silently
+                  # /quiet: silent installation
+                  # /norestart: don't restart
+                  $msiArgs = "/i `"$oscImgMsi`" /quiet /norestart"
+                  $msiProcess = Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -PassThru -NoNewWindow
+                  
+                  Write-Host "oscdimg MSI installation exited with code: $($msiProcess.ExitCode)"
+                  
+                  if ($msiProcess.ExitCode -eq 0) {
+                    Write-Host "Waiting for oscdimg to be available..."
+                    Start-Sleep -Seconds 10
+                    
+                    # Check for oscdimg after installation
+                    foreach ($path in $oscdimgPaths) {
+                      if (Test-Path $path) {
+                        $oscdimgPath = $path
+                        $oscdimgFound = $true
+                        Write-Host "oscdimg now available at: $path"
+                        break
+                      }
+                    }
+                    
+                    # If still not found, search recursively
+                    if (-not $oscdimgFound) {
+                      $adkBasePaths = @(
+                        "${env:ProgramFiles(x86)}\Windows Kits\10\Assessment and Deployment Kit",
+                        "${env:ProgramFiles}\Windows Kits\10\Assessment and Deployment Kit"
+                      )
+                      
+                      foreach ($adkBase in $adkBasePaths) {
+                        if (Test-Path $adkBase) {
+                          Write-Host "Searching for oscdimg.exe in: $adkBase"
+                          $foundOscdimg = Get-ChildItem -Path $adkBase -Filter "oscdimg.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+                          if ($foundOscdimg) {
+                            $oscdimgPath = $foundOscdimg.FullName
+                            $oscdimgFound = $true
+                            Write-Host "Found oscdimg at: $oscdimgPath"
+                            break
+                          }
+                        }
+                      }
+                    }
+                  }
+                } else {
+                  Write-Warning "Could not find oscdimg MSI installer in downloaded ADK folder"
+                }
+                
+                # Clean up download folder
+                Remove-Item -Path $downloadFolder -Recurse -Force -ErrorAction SilentlyContinue
+              } else {
+                Write-Warning "ADK download process exited with code: $($process.ExitCode)"
+              }
+              
+              # Clean up installer
+              Remove-Item $adkInstaller -Force -ErrorAction SilentlyContinue
+            } catch {
+              Write-Warning "Failed to download/install Windows ADK: $_"
+              Write-Host "Error details: $($_.Exception.Message)"
+              Write-Host "Will use WSL mkisofs as fallback for ISO creation if oscdimg is not found."
+            }
           }
         }
         

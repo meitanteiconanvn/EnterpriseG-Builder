@@ -83,11 +83,99 @@ jobs:
         Write-Host "Downloading ISO from: $isoUrl"
         Write-Host "Saving to: $isoPath"
         
+        # Function to show download progress with speed
+        function Download-WithProgress {
+          param(
+            [string]$Url,
+            [string]$Destination,
+            [long]$ExistingSize = 0
+          )
+          
+          $request = [System.Net.HttpWebRequest]::Create($Url)
+          if ($ExistingSize -gt 0) {
+            $request.AddRange($ExistingSize)
+          }
+          $response = $request.GetResponse()
+          
+          $totalSize = $response.ContentLength
+          if ($totalSize -eq -1) {
+            # Content-Length not available, try HEAD request
+            $headRequest = [System.Net.HttpWebRequest]::Create($Url)
+            $headRequest.Method = "HEAD"
+            $headResponse = $headRequest.GetResponse()
+            $totalSize = $headResponse.ContentLength
+            $headResponse.Close()
+          }
+          
+          $stream = $response.GetResponseStream()
+          
+          if ($ExistingSize -gt 0) {
+            $fileStream = [System.IO.File]::OpenWrite($Destination)
+            $fileStream.Seek($ExistingSize, [System.IO.SeekOrigin]::Begin) | Out-Null
+            $downloadedSize = $ExistingSize
+          } else {
+            $fileStream = [System.IO.File]::Create($Destination)
+            $downloadedSize = 0
+          }
+          
+          $buffer = New-Object byte[] 1MB
+          $lastUpdate = Get-Date
+          $lastSize = $downloadedSize
+          $startTime = Get-Date
+          
+          try {
+            while ($true) {
+              $bytesRead = $stream.Read($buffer, 0, $buffer.Length)
+              if ($bytesRead -eq 0) { break }
+              
+              $fileStream.Write($buffer, 0, $bytesRead)
+              $downloadedSize += $bytesRead
+              
+              $now = Get-Date
+              $elapsed = ($now - $lastUpdate).TotalSeconds
+              
+              # Update every 1 second
+              if ($elapsed -ge 1) {
+                $chunkSize = $downloadedSize - $lastSize
+                $speed = $chunkSize / $elapsed
+                $speedMBps = $speed / 1MB
+                
+                if ($totalSize -gt 0) {
+                  $percent = [math]::Round(($downloadedSize / $totalSize) * 100, 2)
+                  $downloadedMB = [math]::Round($downloadedSize / 1MB, 2)
+                  $totalMB = [math]::Round($totalSize / 1MB, 2)
+                  $remaining = $totalSize - $downloadedSize
+                  $etaSeconds = if ($speed -gt 0) { [math]::Round($remaining / $speed) } else { 0 }
+                  $eta = [TimeSpan]::FromSeconds($etaSeconds)
+                  
+                  Write-Host "Progress: $percent% ($downloadedMB MB / $totalMB MB) | Speed: $([math]::Round($speedMBps, 2)) MB/s | ETA: $($eta.ToString('hh\:mm\:ss'))" -NoNewline
+                  Write-Host "`r" -NoNewline
+                } else {
+                  $downloadedMB = [math]::Round($downloadedSize / 1MB, 2)
+                  Write-Host "Downloaded: $downloadedMB MB | Speed: $([math]::Round($speedMBps, 2)) MB/s" -NoNewline
+                  Write-Host "`r" -NoNewline
+                }
+                
+                $lastUpdate = $now
+                $lastSize = $downloadedSize
+              }
+            }
+            
+            Write-Host "" # New line after progress
+            $totalTime = (Get-Date) - $startTime
+            $finalSizeMB = [math]::Round($downloadedSize / 1MB, 2)
+            $avgSpeedMBps = [math]::Round(($downloadedSize / $totalTime.TotalSeconds) / 1MB, 2)
+            Write-Host "Download completed: $finalSizeMB MB in $($totalTime.ToString('hh\:mm\:ss')) | Average speed: $avgSpeedMBps MB/s" -ForegroundColor Green
+          } finally {
+            $fileStream.Close()
+            $stream.Close()
+            $response.Close()
+          }
+        }
+        
         try {
-          # Optimize download with resume support and better error handling
           $ProgressPreference = 'SilentlyContinue'
           
-          # Use BITS (Background Intelligent Transfer Service) for better resume support
           # Check if file exists and resume download
           if (Test-Path $isoPath) {
             Write-Host "Existing file found. Checking if resume is needed..."
@@ -103,35 +191,20 @@ jobs:
               
               if ($existingSize -lt $contentLength -and $contentLength -gt 0) {
                 Write-Host "Resuming download from $existingSize bytes..."
-                $request = [System.Net.HttpWebRequest]::Create($isoUrl)
-                $request.AddRange($existingSize)
-                $response = $request.GetResponse()
-                $stream = $response.GetResponseStream()
-                $fileStream = [System.IO.File]::OpenWrite($isoPath)
-                $fileStream.Seek($existingSize, [System.IO.SeekOrigin]::Begin) | Out-Null
-                $buffer = New-Object byte[] 1MB
-                $bytesRead = 0
-                do {
-                  $bytesRead = $stream.Read($buffer, 0, $buffer.Length)
-                  $fileStream.Write($buffer, 0, $bytesRead)
-                } while ($bytesRead -gt 0)
-                $fileStream.Close()
-                $stream.Close()
-                $response.Close()
-                Write-Host "Resume download completed"
+                Download-WithProgress -Url $isoUrl -Destination $isoPath -ExistingSize $existingSize
               } else {
                 Write-Host "File already complete or cannot resume. Starting fresh download..."
                 Remove-Item $isoPath -Force
-                Invoke-WebRequest -Uri $isoUrl -OutFile $isoPath -UseBasicParsing -TimeoutSec 3600 -MaximumRetryCount 3
+                Download-WithProgress -Url $isoUrl -Destination $isoPath
               }
             } catch {
               Write-Host "Resume not supported, downloading fresh..."
-              Remove-Item $isoPath -Force
-              Invoke-WebRequest -Uri $isoUrl -OutFile $isoPath -UseBasicParsing -TimeoutSec 3600 -MaximumRetryCount 3
+              Remove-Item $isoPath -Force -ErrorAction SilentlyContinue
+              Download-WithProgress -Url $isoUrl -Destination $isoPath
             }
           } else {
-            # Fresh download with optimized settings
-            Invoke-WebRequest -Uri $isoUrl -OutFile $isoPath -UseBasicParsing -TimeoutSec 3600 -MaximumRetryCount 3
+            # Fresh download with progress
+            Download-WithProgress -Url $isoUrl -Destination $isoPath
           }
           
           $isoSize = (Get-Item $isoPath).Length / 1GB

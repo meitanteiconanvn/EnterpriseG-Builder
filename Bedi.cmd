@@ -71,8 +71,18 @@ Echo o-------------------------------- THE CONSTRUCTION Of %_bldUpp% -----------
 Echo ========================================================================================================
 Echo.
 Echo.
-%<%:cf " Prepare "%>>% & %<%:3f " Checking all payload files necessary "%>>% & %<%:1f " Please wait "%>%
-%z7% l -ba "%_iw%" -r "windows\servicing\packages\*_for_KB*.*" | find /i "_" %_Nol% && Call :_Warn "Only supports images without any update packages."
+%<%:cf " Prepare "%>>% & %<%:3f " Checking all payload files necessary "%>>% & %<%:f0 " Please wait "%>%
+REM Check for update packages and remove them automatically
+echo [STEP] Checking for update packages in image...
+set "_hasUpdates=0"
+%z7% l -ba "%_iw%" -r "windows\servicing\packages\*_for_KB*.*" | find /i "_" >nul 2>&1 && set "_hasUpdates=1"
+if %_hasUpdates% equ 1 (
+echo [WARNING] Update packages detected in image - Attempting to remove them automatically...
+call :_RemoveUpdatePackages
+echo [OK] Update packages removal completed.
+) else (
+echo [OK] No update packages found in image.
+)
 For /f "tokens=3 delims=: " %%# in ('%WLIB% info "%_iw%" 2^>Nul ^| Findstr /i /c:"Image Count:"') do (If %%# geq 2 Call :_Warn "Only need professional edition alone.")
 For /f "tokens=3 delims=: " %%# in ('%WLIB% info "%_iw%" 1 2^>Nul ^| Findstr /i /c:"Edition ID:"') do (Set "_eid=%%#")
 if /i not "%_eid%"=="%_sourSKU%" (Call :_Warn "This source image is not %_sourSKU% edition!")
@@ -489,6 +499,48 @@ Exit /b
 Echo:
 ping 127.0.0.1 -n %* >Nul
 Echo:
+Exit /b
+
+:_RemoveUpdatePackages
+REM Function to automatically remove update packages from WIM
+echo [STEP] Removing update packages from Windows image...
+setlocal EnableDelayedExpansion
+set "_tempMount=%ROOT%\temp_cleanup_mnt"
+set "_tempExt=%RANDOM% * 400 / 32768 + 1"
+set /a "_tempExt=%RANDOM% * 400 / 32768 + 1"
+set "_tempMount=%ROOT%\temp_cleanup%_tempExt%"
+REM Create temp mount directory
+if not exist "%_tempMount%" mkdir "%_tempMount%" %_Nol%
+REM Mount WIM temporarily
+echo [STEP] Mounting image temporarily to remove update packages...
+%DISM% /logpath:%_log%\cleanup_mount.log /LogLevel:1 /ScratchDir:%_scDir% /Mount-Image /ImageFile:%_iw% /index:1 /MountDir:%_tempMount% %_Nol%
+if %ERRORLEVEL% neq 0 (
+echo [WARNING] Failed to mount image for cleanup. Skipping update package removal.
+endlocal
+exit /b
+)
+REM Remove update packages using PowerShell/DISM
+echo [STEP] Removing update packages...
+REM Use PowerShell to find and remove KB packages
+powershell -nologo -noni -nop -exec bypass -c "$packages = Get-ChildItem -Path '%_tempMount%\Windows\servicing\Packages' -Filter '*_for_KB*.*' -ErrorAction SilentlyContinue; if ($packages) { Write-Host \"Found $($packages.Count) update packages\"; $packages | ForEach-Object { try { Remove-Item $_.FullName -Force -ErrorAction SilentlyContinue; Write-Host \"Removed: $($_.Name)\" } catch { Write-Warning \"Failed to remove: $($_.Name)\" } } } else { Write-Host 'No update packages found' }"
+REM Also try using DISM to remove packages
+for /f "tokens=*" %%p in ('powershell -nologo -noni -nop -exec bypass -c "Get-ChildItem -Path '%_tempMount%\Windows\servicing\Packages' -Filter '*_for_KB*.mum' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name"') do (
+echo [STEP] Removing package: %%p
+%DISM% /Quiet /Logpath:%_log%\cleanup_pkg.log /ScratchDir:%_scDir% /image:%_tempMount% /Remove-Package /PackageName:%%p %_Nol% 2>nul
+)
+REM Commit changes
+echo [STEP] Committing changes...
+%DISM% /logpath:%_log%\cleanup_commit.log /LogLevel:1 /ScratchDir:%_scDir% /Unmount-wim /Mountdir:%_tempMount% /Commit %_Nol%
+if %ERRORLEVEL% neq 0 (
+echo [WARNING] Failed to commit changes. Attempting discard...
+%DISM% /logpath:%_log%\cleanup_discard.log /LogLevel:1 /ScratchDir:%_scDir% /Unmount-wim /Mountdir:%_tempMount% /Discard %_Nol%
+endlocal
+exit /b
+)
+REM Cleanup temp mount directory
+if exist "%_tempMount%" rmdir /s /q "%_tempMount%" %_Nol%
+echo [OK] Update packages removed successfully.
+endlocal
 Exit /b
 
 ::Parameter: Limiter, Path, Encoding

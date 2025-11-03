@@ -248,9 +248,9 @@ jobs:
             $stream.Close()
             $response.Close()
           }
-        }
-        
-        try {
+          }
+          
+          try {
           $ProgressPreference = 'SilentlyContinue'
           
           if (Test-Path $isoPath) {

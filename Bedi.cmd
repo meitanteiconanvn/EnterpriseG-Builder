@@ -229,7 +229,25 @@ Call :_Teet 2
 echo.
 echo [STEP] Starting %_targSKU% edition conversion...
 %<%:4f " Building "%>>% & %<%:f0 " Start building %_targSKU% "%>%
-%DISM% /logpath:%_log%\convert.log %DismFmt% /Apply-Unattend:%_unXml% && echo [OK] Edition conversion started. || Call :_Warn "Apply unattend has Fail."
+REM Apply unattend with scratch dir; on 0x800f0831, attempt component cleanup then retry
+(
+  %DISM% /logpath:%_log%\convert.log /LogLevel:1 /ScratchDir:%_scDir% %DismFmt% /Apply-Unattend:%_unXml%
+) && (
+  echo [OK] Edition conversion started.
+) || (
+  echo [WARNING] Apply-Unattend failed, checking for 0x800f0831...
+  Findstr /i "0x800f0831" "%_log%\convert.log" >nul 2>&1 && (
+    echo [WARNING] Detected 0x800f0831 - running StartComponentCleanup /ResetBase and retrying...
+    %DISM% /logpath:%_log%\cleanup_unattend.log /LogLevel:1 /ScratchDir:%_scDir% %DismFmt% /Cleanup-Image /StartComponentCleanup /ResetBase %_Nol%
+    %DISM% /logpath:%_log%\convert_retry.log /LogLevel:1 /ScratchDir:%_scDir% %DismFmt% /Apply-Unattend:%_unXml% && (
+      echo [OK] Edition conversion started (retry).
+    ) || (
+      Call :_Warn "Apply unattend has Fail (0x800f0831 after retry)."
+    )
+  ) || (
+    Call :_Warn "Apply unattend has Fail."
+  )
+)
 Call :_Teet 2
 %<%:1f " Integrate "%>>% & %<%:f0 " Integrate client language package "%>%
 echo:

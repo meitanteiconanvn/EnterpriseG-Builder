@@ -339,8 +339,32 @@ echo [AUTO] Store: !_store! - Defender: !_defender! - Edge: !_msedge! - WinRE: !
 echo.
 ))))))))
 if !_skipMenu! equ 1 (
-REM Config is ready, skip menu and continue - preserve variables
-endlocal & set "_sourSKU=%_sourSKU%" & set "_targSKU=%_targSKU%" & set "_store=%_store%" & set "_defender=%_defender%" & set "_msedge=%_msedge%" & set "_helospeech=%_helospeech%" & set "_winre=%_winre%" & set "_wifirtl=%_wifirtl%"
+REM Config is ready, skip menu and continue - preserve variables using delayed expansion
+set "_skipMenu_sourSKU=!_sourSKU!"
+set "_skipMenu_targSKU=!_targSKU!"
+set "_skipMenu_store=!_store!"
+set "_skipMenu_defender=!_defender!"
+set "_skipMenu_msedge=!_msedge!"
+set "_skipMenu_helospeech=!_helospeech!"
+set "_skipMenu_winre=!_winre!"
+set "_skipMenu_wifirtl=!_wifirtl!"
+endlocal
+set "_sourSKU=%_skipMenu_sourSKU%"
+set "_targSKU=%_skipMenu_targSKU%"
+set "_store=%_skipMenu_store%"
+set "_defender=%_skipMenu_defender%"
+set "_msedge=%_skipMenu_msedge%"
+set "_helospeech=%_skipMenu_helospeech%"
+set "_winre=%_skipMenu_winre%"
+set "_wifirtl=%_skipMenu_wifirtl%"
+set "_skipMenu_sourSKU="
+set "_skipMenu_targSKU="
+set "_skipMenu_store="
+set "_skipMenu_defender="
+set "_skipMenu_msedge="
+set "_skipMenu_helospeech="
+set "_skipMenu_winre="
+set "_skipMenu_wifirtl="
 goto :eof
 )
 set "_targSKU=Pro_to_EnterpriseG,Pro_to_EnterpriseS,Pro_to_WNC,Core_to_Starter,Server_to_EnterpriseS,Server_to_EnterpriseG"

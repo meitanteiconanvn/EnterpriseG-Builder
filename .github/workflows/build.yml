@@ -1290,44 +1290,180 @@ jobs:
         
         Write-Host "Executing Bedi.cmd with auto-answered prompts..."
         Write-Host "Note: Menu option '$menuOption' will be auto-selected, and 'X' will be chosen at the end"
-        $process = Start-Process -FilePath "run-bedi-auto.cmd" -WorkingDirectory $PWD -Wait -NoNewWindow -PassThru -RedirectStandardOutput "bedi_output.txt" -RedirectStandardError "bedi_error.txt"
+        Write-Host ""
+        
+        # Start process and monitor output in realtime
+        $outputFile = "bedi_output.txt"
+        $errorFile = "bedi_error.txt"
+        
+        # Clear previous output files
+        if (Test-Path $outputFile) { Remove-Item $outputFile -Force }
+        if (Test-Path $errorFile) { Remove-Item $errorFile -Force }
+        
+        # Start process in background to monitor output
+        $process = Start-Process -FilePath "run-bedi-auto.cmd" -WorkingDirectory $PWD -NoNewWindow -PassThru -RedirectStandardOutput $outputFile -RedirectStandardError $errorFile
+        
+        Write-Host "Bedi.cmd process started (PID: $($process.Id))"
+        Write-Host "Monitoring output in realtime..."
+        Write-Host ""
+        
+        # Monitor output file in realtime
+        $lastPosition = 0
+        $startTime = Get-Date
+        $timeoutMinutes = 180  # 3 hours timeout
+        
+        while (-not $process.HasExited) {
+            Start-Sleep -Seconds 2
+            
+            # Check for timeout
+            $elapsed = (Get-Date) - $startTime
+            if ($elapsed.TotalMinutes -gt $timeoutMinutes) {
+                Write-Error "Bedi.cmd process exceeded timeout of $timeoutMinutes minutes"
+                Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+                exit 1
+            }
+            
+            # Read new output
+            if (Test-Path $outputFile) {
+                $fileStream = [System.IO.File]::OpenRead($outputFile)
+                $fileStream.Position = $lastPosition
+                $reader = New-Object System.IO.StreamReader($fileStream)
+                
+                while ($null -ne ($line = $reader.ReadLine())) {
+                    Write-Host $line
+                }
+                
+                $lastPosition = $fileStream.Position
+                $reader.Close()
+                $fileStream.Close()
+            }
+            
+            # Also check error file
+            if (Test-Path $errorFile) {
+                $errorContent = Get-Content $errorFile -ErrorAction SilentlyContinue
+                if ($errorContent -and $errorContent.Count -gt 0) {
+                    Write-Host "[ERROR] $($errorContent[-1])" -ForegroundColor Red
+                }
+            }
+            
+            # Show progress every 30 seconds
+            $elapsedSeconds = [math]::Floor($elapsed.TotalSeconds)
+            if ($elapsedSeconds % 30 -eq 0 -and $elapsedSeconds -gt 0) {
+                Write-Host "[Progress] Bedi.cmd has been running for $([math]::Floor($elapsed.TotalMinutes)) minutes..." -ForegroundColor Yellow
+            }
+        }
+        
+        # Wait for process to fully exit
+        $process.WaitForExit()
+        $exitCode = $process.ExitCode
+        
+        # Read any remaining output
+        if (Test-Path $outputFile) {
+            $fileStream = [System.IO.File]::OpenRead($outputFile)
+            $fileStream.Position = $lastPosition
+            $reader = New-Object System.IO.StreamReader($fileStream)
+            
+            while ($null -ne ($line = $reader.ReadLine())) {
+                Write-Host $line
+            }
+            
+            $reader.Close()
+            $fileStream.Close()
+        }
+        
+        Write-Host ""
+        Write-Host "Bedi.cmd process exited with code: $exitCode"
         
         # Check if Bedi exited because it updated config (exit code 0 but menu was shown)
-        # If exit code is 0 but we're still here, Bedi may have updated config and exited
-        # In that case, Bedi.ini should now be correct and we can run again
-        
-        if ($process.ExitCode -eq 0) {
+        if ($exitCode -eq 0) {
             # Check if Bedi actually completed build or just updated config
-            if (Test-Path "bedi_output.txt") {
-                $output = Get-Content "bedi_output.txt" -Raw
-                if ($output -match "successfully constructed" -or $output -match "FINISH") {
-                    Write-Host "Bedi.cmd completed successfully"
+            if (Test-Path $outputFile) {
+                $output = Get-Content $outputFile -Raw
+                if ($output -match "successfully constructed" -or $output -match "FINISH" -or $output -match "completed") {
+                    Write-Host "✓ Bedi.cmd completed successfully" -ForegroundColor Green
                 } else {
-                    Write-Host "Bedi.cmd may have updated config and exited. Checking..."
+                    Write-Host "Bedi.cmd may have updated config and exited. Checking output..."
+                    Write-Host "=== Last 50 lines of Bedi output ==="
+                    Get-Content $outputFile -Tail 50
+                    
                     # Run Bedi again - it should now use the updated config
+                    Write-Host ""
                     Write-Host "Running Bedi.cmd again with updated config..."
-                    $process2 = Start-Process -FilePath "run-bedi-auto.cmd" -WorkingDirectory $PWD -Wait -NoNewWindow -PassThru -RedirectStandardOutput "bedi_output2.txt" -RedirectStandardError "bedi_error2.txt"
-                    if ($process2.ExitCode -ne 0) {
-                        Write-Warning "Second Bedi.cmd run exited with code: $($process2.ExitCode)"
-                        if (Test-Path "bedi_output2.txt") {
-                            Write-Host "=== Bedi Output (Run 2) ==="
-                            Get-Content "bedi_output2.txt" -Tail 50
+                    # Clear output files for second run
+                    if (Test-Path $outputFile) { Remove-Item $outputFile -Force }
+                    if (Test-Path $errorFile) { Remove-Item $errorFile -Force }
+                    
+                    $process2 = Start-Process -FilePath "run-bedi-auto.cmd" -WorkingDirectory $PWD -NoNewWindow -PassThru -RedirectStandardOutput $outputFile -RedirectStandardError $errorFile
+                    Write-Host "Bedi.cmd process started (PID: $($process2.Id))"
+                    
+                    $lastPosition2 = 0
+                    $startTime2 = Get-Date
+                    
+                    while (-not $process2.HasExited) {
+                        Start-Sleep -Seconds 2
+                        
+                        $elapsed2 = (Get-Date) - $startTime2
+                        if ($elapsed2.TotalMinutes -gt $timeoutMinutes) {
+                            Write-Error "Second Bedi.cmd run exceeded timeout"
+                            Stop-Process -Id $process2.Id -Force -ErrorAction SilentlyContinue
+                            exit 1
                         }
-                        exit $process2.ExitCode
+                        
+                        if (Test-Path $outputFile) {
+                            $fileStream = [System.IO.File]::OpenRead($outputFile)
+                            $fileStream.Position = $lastPosition2
+                            $reader = New-Object System.IO.StreamReader($fileStream)
+                            
+                            while ($null -ne ($line = $reader.ReadLine())) {
+                                Write-Host $line
+                            }
+                            
+                            $lastPosition2 = $fileStream.Position
+                            $reader.Close()
+                            $fileStream.Close()
+                        }
+                    }
+                    
+                    $process2.WaitForExit()
+                    $exitCode2 = $process2.ExitCode
+                    
+                    # Read remaining output
+                    if (Test-Path $outputFile) {
+                        $fileStream = [System.IO.File]::OpenRead($outputFile)
+                        $fileStream.Position = $lastPosition2
+                        $reader = New-Object System.IO.StreamReader($fileStream)
+                        
+                        while ($null -ne ($line = $reader.ReadLine())) {
+                            Write-Host $line
+                        }
+                        
+                        $reader.Close()
+                        $fileStream.Close()
+                    }
+                    
+                    if ($exitCode2 -ne 0) {
+                        Write-Warning "Second Bedi.cmd run exited with code: $exitCode2"
+                        if (Test-Path $outputFile) {
+                            Write-Host "=== Bedi Output (Run 2) ==="
+                            Get-Content $outputFile -Tail 50
+                        }
+                        exit $exitCode2
+                    } else {
+                        Write-Host "✓ Bedi.cmd completed successfully on second run" -ForegroundColor Green
                     }
                 }
             }
         } else {
-            Write-Warning "Bedi.cmd exited with code: $($process.ExitCode)"
-            if (Test-Path "bedi_output.txt") {
+            Write-Warning "Bedi.cmd exited with code: $exitCode"
+            if (Test-Path $outputFile) {
                 Write-Host "=== Bedi Output ==="
-                Get-Content "bedi_output.txt" -Tail 50
+                Get-Content $outputFile -Tail 50
             }
-            if (Test-Path "bedi_error.txt") {
+            if (Test-Path $errorFile) {
                 Write-Host "=== Bedi Errors ==="
-                Get-Content "bedi_error.txt" -Tail 50
+                Get-Content $errorFile -Tail 50
             }
-            exit $process.ExitCode
+            exit $exitCode
         }
         
     - name: Check build output

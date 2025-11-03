@@ -703,9 +703,10 @@ jobs:
                   Remove-Item $adkInstaller -Force -ErrorAction SilentlyContinue
                 }
               } catch {
-              Write-Warning "Failed to download/install Windows ADK: $_"
-              Write-Host "Error details: $($_.Exception.Message)"
-              Write-Host "Will use WSL mkisofs as fallback for ISO creation if oscdimg is not found."
+                Write-Warning "Failed to download/install Windows ADK: $_"
+                Write-Host "Error details: $($_.Exception.Message)"
+                Write-Host "Will use WSL mkisofs as fallback for ISO creation if oscdimg is not found."
+              }
             }
           }
         }

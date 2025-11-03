@@ -852,20 +852,53 @@ jobs:
           Write-Host "WIM Info:"
           Write-Host $wimInfo
           
-          # Extract build number from WIM info
+          # Extract build number from WIM info - Multiple methods for better detection
           # Format: Version: 10.0.22621.1 or similar
           $lines = $wimInfo -split "`n"
           $currentIndex = 0
           $proIndex = $null
           $proIndexExact = $null  # Exact match for "Edition ID: Professional"
+          $buildNumberByIndex = @{}  # Store build number per index
           
           foreach ($line in $lines) {
-            # Detect build number from version string
+            # Method 1: Detect build number from version string (multiple formats)
+            # Format: Version: 10.0.22621.1
             if ($line -match "Version:\s+10\.0\.(\d+)\.(\d+)") {
+              $buildNum = $matches[1]
+              $revision = $matches[2]
+              
+              # Store build number for current index
+              if ($currentIndex -gt 0) {
+                $buildNumberByIndex[$currentIndex] = $buildNum
+              }
+              
+              # Use first found as default, but prefer Professional edition's build number
+              if (-not $detectedBuildNumber) {
+                $detectedBuildNumber = $buildNum
+                Write-Host "Detected Windows Build Number: $detectedBuildNumber (from index $currentIndex)"
+              }
+            }
+            
+            # Method 2: Detect from DisplayVersion or DisplayName
+            # Format: DisplayVersion: 22H2, Build: 22621
+            if ($line -match "DisplayVersion.*Build[:\s]+(\d+)" -or $line -match "Build[:\s]+(\d{5})") {
+              $buildNum = $matches[1]
+              if ($currentIndex -gt 0) {
+                $buildNumberByIndex[$currentIndex] = $buildNum
+              }
+              if (-not $detectedBuildNumber -and $buildNum.Length -ge 4) {
+                $detectedBuildNumber = $buildNum
+                Write-Host "Detected Windows Build Number: $detectedBuildNumber (from DisplayVersion/Build)"
+              }
+            }
+            
+            # Method 3: Detect from Architecture string (sometimes contains build info)
+            # Format: Architecture: amd64, Build: 22621
+            if ($line -match "Architecture.*Build[:\s]+(\d{5})") {
               $buildNum = $matches[1]
               if (-not $detectedBuildNumber) {
                 $detectedBuildNumber = $buildNum
-                Write-Host "Detected Windows Build Number: $detectedBuildNumber"
+                Write-Host "Detected Windows Build Number: $detectedBuildNumber (from Architecture)"
               }
             }
             
@@ -878,6 +911,12 @@ jobs:
             if ($line -match "Edition ID:\s+Professional$" -or $line -match "Edition ID:\s+Professional\s*$") {
               $proIndexExact = $currentIndex
               Write-Host "Found exact Professional edition at index: $proIndexExact"
+              
+              # Prefer build number from Professional edition
+              if ($buildNumberByIndex.ContainsKey($currentIndex)) {
+                $detectedBuildNumber = $buildNumberByIndex[$currentIndex]
+                Write-Host "Using build number from Professional edition: $detectedBuildNumber"
+              }
             }
             
             # Fallback: if no exact match, use first Professional variant
@@ -885,8 +924,56 @@ jobs:
               if (-not $proIndex) {
                 $proIndex = $currentIndex
                 Write-Host "Found Professional variant at index: $proIndex"
+                
+                # Use build number from this Professional variant if available
+                if ($buildNumberByIndex.ContainsKey($currentIndex) -and -not $detectedBuildNumber) {
+                  $detectedBuildNumber = $buildNumberByIndex[$currentIndex]
+                  Write-Host "Using build number from Professional variant: $detectedBuildNumber"
+                }
               }
             }
+          }
+          
+          # Final fallback: Try to extract build number from ISO file name or metadata
+          if (-not $detectedBuildNumber) {
+            Write-Host "Build number not found in WIM info. Trying alternative methods..."
+            
+            # Method 4: Try to read from ISO mount path (if still mounted)
+            $isoLabel = Get-Volume | Where-Object { $_.DriveLetter -eq $driveLetter } | Select-Object -ExpandProperty FileSystemLabel -ErrorAction SilentlyContinue
+            if ($isoLabel -match "(\d{5})") {
+              $detectedBuildNumber = $matches[1]
+              Write-Host "Detected Windows Build Number from ISO label: $detectedBuildNumber"
+            }
+            
+            # Method 5: Try to extract from file metadata
+            $wimFile = Get-Item $sourceWimPath -ErrorAction SilentlyContinue
+            if ($wimFile) {
+              # Check if filename contains build number
+              if ($wimFile.Name -match "(\d{5})") {
+                $detectedBuildNumber = $matches[1]
+                Write-Host "Detected Windows Build Number from filename: $detectedBuildNumber"
+              }
+            }
+          }
+          
+          # If still no build number, try to get from first index
+          if (-not $detectedBuildNumber -and $buildNumberByIndex.Count -gt 0) {
+            $firstIndex = ($buildNumberByIndex.Keys | Sort-Object)[0]
+            $detectedBuildNumber = $buildNumberByIndex[$firstIndex]
+            Write-Host "Using build number from first available index ($firstIndex): $detectedBuildNumber"
+          }
+          
+          # Validate detected build number
+          if ($detectedBuildNumber) {
+            # Build number should be 5 digits typically (e.g., 22621, 22631, 19045)
+            if ($detectedBuildNumber -match "^\d{4,6}$") {
+              Write-Host "✓ Final detected Windows Build Number: $detectedBuildNumber" -ForegroundColor Green
+            } else {
+              Write-Warning "Detected build number '$detectedBuildNumber' may be invalid. Expected 4-6 digits."
+              $detectedBuildNumber = $null
+            }
+          } else {
+            Write-Warning "Could not detect Windows Build Number automatically"
           }
           
           # Use exact match if found, otherwise use first variant found

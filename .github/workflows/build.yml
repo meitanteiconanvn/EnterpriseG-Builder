@@ -1263,7 +1263,7 @@ jobs:
             default { "1" }
         }
         
-        Write-Host "Menu option for $targetSku: $menuOption"
+        Write-Host "Menu option for ${targetSku}: $menuOption"
         
         # Create a wrapper batch script that:
         # 1. Pipes menu option number to Bedi.cmd for menu selection

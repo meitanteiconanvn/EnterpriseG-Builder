@@ -938,20 +938,25 @@ jobs:
           if (-not $detectedBuildNumber) {
             Write-Host "Build number not found in WIM info. Trying alternative methods..."
             
-            # Method 4: Try to read from ISO mount path (if still mounted)
-            $isoLabel = Get-Volume | Where-Object { $_.DriveLetter -eq $driveLetter } | Select-Object -ExpandProperty FileSystemLabel -ErrorAction SilentlyContinue
-            if ($isoLabel -match "(\d{5})") {
-              $detectedBuildNumber = $matches[1]
-              Write-Host "Detected Windows Build Number from ISO label: $detectedBuildNumber"
-            }
-            
-            # Method 5: Try to extract from file metadata
+            # Method 4: Try to extract from WIM file metadata or directory structure
             $wimFile = Get-Item $sourceWimPath -ErrorAction SilentlyContinue
             if ($wimFile) {
-              # Check if filename contains build number
-              if ($wimFile.Name -match "(\d{5})") {
+              # Check if parent directory name contains build number
+              $parentDir = $wimFile.DirectoryName
+              if ($parentDir -match "(\d{5})") {
                 $detectedBuildNumber = $matches[1]
-                Write-Host "Detected Windows Build Number from filename: $detectedBuildNumber"
+                Write-Host "Detected Windows Build Number from directory path: $detectedBuildNumber"
+              }
+            }
+            
+            # Method 5: Try to extract from environment variables or ISO mount info
+            # (Note: ISO may already be unmounted, so skip ISO label check)
+            # Instead, check if there's any build info in the mount path
+            if ($mountPath -and (Test-Path $mountPath)) {
+              $mountDir = Get-Item $mountPath -ErrorAction SilentlyContinue
+              if ($mountDir -and $mountDir.Name -match "(\d{5})") {
+                $detectedBuildNumber = $matches[1]
+                Write-Host "Detected Windows Build Number from mount path: $detectedBuildNumber"
               }
             }
           }

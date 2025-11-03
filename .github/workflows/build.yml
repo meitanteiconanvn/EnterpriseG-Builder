@@ -71,17 +71,14 @@ jobs:
     - name: Download Windows ISO
       shell: pwsh
       run: |
-        Write-Host "Downloading Windows ISO..."
         $isoUrl = "${{ github.event.inputs.iso_url || env.ISO_URL }}"
         if (-not $isoUrl) {
-          Write-Error "ISO URL is required. Please provide it via workflow input or environment variable."
+          Write-Error "ISO URL is required."
           exit 1
         }
         
         $isoPath = "$PWD\source.iso"
-        
-        Write-Host "Downloading ISO from: $isoUrl"
-        Write-Host "Saving to: $isoPath"
+        Write-Host "Downloading ISO..." -ForegroundColor Cyan
         
         # Function to show download progress with speed
         function Download-WithProgress {
@@ -99,7 +96,6 @@ jobs:
           
           $totalSize = $response.ContentLength
           if ($totalSize -eq -1) {
-            # Content-Length not available, try HEAD request
             $headRequest = [System.Net.HttpWebRequest]::Create($Url)
             $headRequest.Method = "HEAD"
             $headResponse = $headRequest.GetResponse()
@@ -134,7 +130,6 @@ jobs:
               $now = Get-Date
               $elapsed = ($now - $lastUpdate).TotalSeconds
               
-              # Update every 1 second
               if ($elapsed -ge 1) {
                 $chunkSize = $downloadedSize - $lastSize
                 $speed = $chunkSize / $elapsed
@@ -161,7 +156,7 @@ jobs:
               }
             }
             
-            Write-Host "" # New line after progress
+            Write-Host ""
             $totalTime = (Get-Date) - $startTime
             $finalSizeMB = [math]::Round($downloadedSize / 1MB, 2)
             $avgSpeedMBps = [math]::Round(($downloadedSize / $totalTime.TotalSeconds) / 1MB, 2)
@@ -176,12 +171,8 @@ jobs:
         try {
           $ProgressPreference = 'SilentlyContinue'
           
-          # Check if file exists and resume download
           if (Test-Path $isoPath) {
-            Write-Host "Existing file found. Checking if resume is needed..."
             $existingSize = (Get-Item $isoPath).Length
-            
-            # Try to get file size from server
             try {
               $request = [System.Net.HttpWebRequest]::Create($isoUrl)
               $request.Method = "HEAD"
@@ -190,25 +181,24 @@ jobs:
               $response.Close()
               
               if ($existingSize -lt $contentLength -and $contentLength -gt 0) {
-                Write-Host "Resuming download from $existingSize bytes..."
+                Write-Host "Resuming download from $([math]::Round($existingSize / 1MB, 2)) MB..." -ForegroundColor Yellow
                 Download-WithProgress -Url $isoUrl -Destination $isoPath -ExistingSize $existingSize
               } else {
-                Write-Host "File already complete or cannot resume. Starting fresh download..."
+                Write-Host "Starting fresh download..." -ForegroundColor Yellow
                 Remove-Item $isoPath -Force
                 Download-WithProgress -Url $isoUrl -Destination $isoPath
               }
             } catch {
-              Write-Host "Resume not supported, downloading fresh..."
+              Write-Host "Starting fresh download..." -ForegroundColor Yellow
               Remove-Item $isoPath -Force -ErrorAction SilentlyContinue
               Download-WithProgress -Url $isoUrl -Destination $isoPath
             }
           } else {
-            # Fresh download with progress
             Download-WithProgress -Url $isoUrl -Destination $isoPath
           }
           
           $isoSize = (Get-Item $isoPath).Length / 1GB
-          Write-Host "ISO download completed. File size: $([math]::Round($isoSize, 2)) GB"
+          Write-Host "ISO size: $([math]::Round($isoSize, 2)) GB" -ForegroundColor Green
         } catch {
           Write-Error "Failed to download ISO: $_"
           exit 1

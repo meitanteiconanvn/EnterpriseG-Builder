@@ -320,16 +320,18 @@ set "%%#"
 set "_oldcfg=%%#,!_oldcfg!"
 ) )
 REM Auto-skip menu if Bedi.ini has complete config
-REM Check if all required variables are defined
+REM Check if all required variables are defined using a simpler approach
 if exist Bedi.ini (
-if defined _sourSKU (
-if defined _targSKU (
-if defined _store (
-if defined _defender (
-if defined _msedge (
-if defined _helospeech (
-if defined _winre (
-if defined _wifirtl (
+set "_configCount=0"
+if defined _sourSKU set /a _configCount+=1
+if defined _targSKU set /a _configCount+=1
+if defined _store set /a _configCount+=1
+if defined _defender set /a _configCount+=1
+if defined _msedge set /a _configCount+=1
+if defined _helospeech set /a _configCount+=1
+if defined _winre set /a _configCount+=1
+if defined _wifirtl set /a _configCount+=1
+if !_configCount! equ 8 (
 REM All variables are defined - skip menu
 set "_skipMenu=1"
 echo.
@@ -337,34 +339,34 @@ echo [AUTO] Bedi.ini found with complete configuration - Skipping menu selection
 echo [AUTO] Source SKU: !_sourSKU! - Target SKU: !_targSKU!
 echo [AUTO] Store: !_store! - Defender: !_defender! - Edge: !_msedge! - WinRE: !_winre!
 echo.
-))))))))
+))
 if !_skipMenu! equ 1 (
-REM Config is ready, skip menu and continue - preserve variables using delayed expansion
-set "_skipMenu_sourSKU=!_sourSKU!"
-set "_skipMenu_targSKU=!_targSKU!"
-set "_skipMenu_store=!_store!"
-set "_skipMenu_defender=!_defender!"
-set "_skipMenu_msedge=!_msedge!"
-set "_skipMenu_helospeech=!_helospeech!"
-set "_skipMenu_winre=!_winre!"
-set "_skipMenu_wifirtl=!_wifirtl!"
+REM Config is ready, skip menu and continue - preserve variables using temporary vars
+set "_tmp_sourSKU=!_sourSKU!"
+set "_tmp_targSKU=!_targSKU!"
+set "_tmp_store=!_store!"
+set "_tmp_defender=!_defender!"
+set "_tmp_msedge=!_msedge!"
+set "_tmp_helospeech=!_helospeech!"
+set "_tmp_winre=!_winre!"
+set "_tmp_wifirtl=!_wifirtl!"
 endlocal
-set "_sourSKU=%_skipMenu_sourSKU%"
-set "_targSKU=%_skipMenu_targSKU%"
-set "_store=%_skipMenu_store%"
-set "_defender=%_skipMenu_defender%"
-set "_msedge=%_skipMenu_msedge%"
-set "_helospeech=%_skipMenu_helospeech%"
-set "_winre=%_skipMenu_winre%"
-set "_wifirtl=%_skipMenu_wifirtl%"
-set "_skipMenu_sourSKU="
-set "_skipMenu_targSKU="
-set "_skipMenu_store="
-set "_skipMenu_defender="
-set "_skipMenu_msedge="
-set "_skipMenu_helospeech="
-set "_skipMenu_winre="
-set "_skipMenu_wifirtl="
+set "_sourSKU=%_tmp_sourSKU%"
+set "_targSKU=%_tmp_targSKU%"
+set "_store=%_tmp_store%"
+set "_defender=%_tmp_defender%"
+set "_msedge=%_tmp_msedge%"
+set "_helospeech=%_tmp_helospeech%"
+set "_winre=%_tmp_winre%"
+set "_wifirtl=%_tmp_wifirtl%"
+set "_tmp_sourSKU="
+set "_tmp_targSKU="
+set "_tmp_store="
+set "_tmp_defender="
+set "_tmp_msedge="
+set "_tmp_helospeech="
+set "_tmp_winre="
+set "_tmp_wifirtl="
 goto :eof
 )
 set "_targSKU=Pro_to_EnterpriseG,Pro_to_EnterpriseS,Pro_to_WNC,Core_to_Starter,Server_to_EnterpriseS,Server_to_EnterpriseG"

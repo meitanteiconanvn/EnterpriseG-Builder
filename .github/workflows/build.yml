@@ -962,6 +962,8 @@ jobs:
           $currentIndex = 0
           $proIndex = $null
           $proIndexExact = $null  # Exact match for "Edition ID: Professional"
+          $serverIndex = $null    # Server Desktop Experience index
+          $isServer = $false      # Flag to indicate if source is Server
           $buildNumberByIndex = @{}  # Store build number per index
           
           foreach ($line in $lines) {
@@ -1130,7 +1132,7 @@ jobs:
           }
           
           $extractedSize = (Get-Item $wimPath).Length / 1GB
-          Write-Host "Professional edition extracted successfully. Size: $([math]::Round($extractedSize, 2)) GB"
+          Write-Host "$detectedEditionType edition extracted successfully. Size: $([math]::Round($extractedSize, 2)) GB"
           
           # Clean up source WIM
           Remove-Item -Path $sourceWimPath -Force -ErrorAction SilentlyContinue

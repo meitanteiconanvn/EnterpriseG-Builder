@@ -161,16 +161,16 @@ goto :_getonexml
 REM Robust version check without PowerShell: accept exact version or base build prefix 10.0.%_bld%.
 set "_verOk=0"
 set "_verPrefix=10.0.%_bld%."
-findstr /i "\"%_version%\"" update.mum %_Nol% >nul 2>&1 && set "_verOk=1"
+findstr /i "\"%_version%\"" update.mum >nul 2>&1 && set "_verOk=1"
 if "%_verOk%"=="0" (
-  findstr /i "%_verPrefix%" update.mum %_Nol% >nul 2>&1 && set "_verOk=1"
+  findstr /i "%_verPrefix%" update.mum >nul 2>&1 && set "_verOk=1"
 )
 if "%_verOk%"=="1" (
   echo [OK] Specific package version is compatible (base build %_bld%).
 ) else (
   echo [WARNING] Could not verify specific package version; continuing...
 )
-findstr /i "Microsoft-Windows-EditionSpecific-%_targSKU%" update.mum %_Nol% >nul 2>&1 || (
+findstr /i "Microsoft-Windows-EditionSpecific-%_targSKU%" update.mum >nul 2>&1 || (
   del /f /q update.mum & call :_Warn "Wrong edition for specific package file"
 )
 del /f /q update.mum && echo [OK] Specific package ready.

@@ -158,18 +158,17 @@ set "_esp=%_cad%\clients.esd" && set "_sourSKU=ServerDatacenterCor"
 goto :_getonexml
 ) else (
 %z7% e -aoa "%_esp%" update.mum %_Nol%
-REM Robust version check: parse version from update.mum and compare base build only
-set "_espVer="
-for /f "usebackq tokens=* delims=" %%v in (`powershell -nologo -noni -nop -exec bypass -c "$c = (Get-Content -LiteralPath 'update.mum' -Raw 2>$null); if ($c -match 'version=\"([0-9\\.]+)\"') { $matches[1] }"`) do set "_espVer=%%v"
-if not defined _espVer (
-  echo [WARNING] Could not read version from edition specific package; continuing...
+REM Robust version check without PowerShell: accept exact version or base build prefix 10.0.%_bld%.
+set "_verOk=0"
+set "_verPrefix=10.0.%_bld%."
+findstr /i "\"%_version%\"" update.mum %_Nol% >nul 2>&1 && set "_verOk=1"
+if "%_verOk%"=="0" (
+  findstr /i "%_verPrefix%" update.mum %_Nol% >nul 2>&1 && set "_verOk=1"
+)
+if "%_verOk%"=="1" (
+  echo [OK] Specific package version is compatible (base build %_bld%).
 ) else (
-  for /f "tokens=3 delims=." %%v in ("%_espVer%") do set "_espBuild=%%v"
-  if /i not "%_espBuild%"=="%_bld%" (
-    echo [WARNING] Edition specific package base build mismatch: expected %_bld%, found %_espBuild% - continuing
-  ) else (
-    echo [OK] Specific package base build matches: %_espBuild%
-  )
+  echo [WARNING] Could not verify specific package version; continuing...
 )
 findstr /i "Microsoft-Windows-EditionSpecific-%_targSKU%" update.mum %_Nol% >nul 2>&1 || (
   del /f /q update.mum & call :_Warn "Wrong edition for specific package file"

@@ -23,12 +23,21 @@ set "<=pushd "%public%"&2>nul findstr /c:\ /a" &set ">=%>>%&echo;" &set "|=%|:~0
 ::# End lean xp+ color macros
 call :_neutralizer
 %<%:cf " Prepare "%>>% & %<%:2f " Starting up... "%>>% & %<%:1f " Please wait "%>%
+echo.
+echo [STEP] Preparing build environment...
+echo [STEP] Checking required files...
 set "_Files=%ROOT%\Files"
 for %%# in (wimlib-imagex.exe 7z.exe NSudo.exe expand.exe expand_new.exe 7z.dll libwim-15.dll ModLCU.cmd msdelta.dll PSFExtractor.exe upmod.cmd) do (
-if not exist "%_Files%\%%#" (Call :_Warn "File "%_Files%\%%#" does not exist.")
+if not exist "%_Files%\%%#" (Call :_Warn "File "%_Files%\%%#" does not exist.") else (echo [OK] %%#)
 )
 call :_MenuTarget
+REM Load config from Bedi.ini after menu (or skip)
 for /f "tokens=*" %%# in ('findstr /i "=" Bedi.ini 2^<Nul') do (set "%%#")
+REM Display current configuration for better visibility
+echo.
+echo [CONFIG] Building %_targSKU% from %_sourSKU%
+echo [CONFIG] Options: Store=%_store%, Defender=%_defender%, Edge=%_msedge%, WinRE=%_winre%
+echo.
 Title Building Windows %_targSKU% from %_sourSKU% image  ~  #%_vbedi%
 for /f "usebackq delims=" %%# in (`powershell "\"%_targSKU%\".ToUpper()"`) do (set "_bldUpp=%%~#")
 set /a _ext=%RANDOM% * 400 / 32768 + 1
@@ -98,9 +107,10 @@ Call :Set_%_targSKU%
 Del /f /q %_cad%\*.xml %_cad%\*.mum %_cad%\*.cat %_Nol%
 for /d %%# in (log* lp* mnt* sdir* sxs*) do (rmdir /s /q "%%#\")
 echo:
-echo Source image version: %_eid% %_version% %_lang% %_arc%
+echo [INFO] Source image version: %_eid% %_version% %_lang% %_arc%
 echo:
-<nul (Set /p _msg=Checking language package...)
+echo [STEP] Checking language package...
+<nul (Set /p _msg=)
 set "_fmtName=Microsoft-Windows-Client-LanguagePack-Package-%_arc%-%_lang%.esd"
 set "_lpp=%_cad%\%_fmtName%"
 if not exist "%_lpp%" (
@@ -116,8 +126,10 @@ if /i not %_version% == %_cversion% (call :_Warn "Wrong language package version
 if /i not %_arc% == %_carc% (call :_Warn "Wrong language package architecture!!")
 if /i %_targSKU% == EnterpriseG (if /i not %_clang% == en-us (Call :_Warn "Language Pack not supported for %_targSKU%. Only en-US"))
 rem if /i not %_lang% == %_clang% (call :_Warn "Only support language package en-US")
-echo  Ready.
-<nul (set /p _msg=Checking specific package...)
+echo [OK] Language package ready.
+echo.
+echo [STEP] Checking specific package...
+<nul (set /p _msg=)
 If not exist "%_esp%" (
 if %_bld% neq 25398 (call :_Warn "Missing edition specific package file")
 if not exist "%_cad%\clients.esd" (call :_Warn "Missing edition specific package file")
@@ -128,48 +140,59 @@ goto :_getonexml
 %z7% e -aoa "%_esp%" update.mum %_Nol%
 findstr /i "\"%_version%\"" update.mum %_Nol% || (del /f /q update.mum & call :_Warn "Wrong edition specific package version!!")
 findstr /i "Microsoft-Windows-EditionSpecific-%_targSKU%" update.mum %_Nol% || (del /f /q update.mum & call :_Warn "Wrong edition for specific package file")
-del /f /q update.mum && echo  ready.
+del /f /q update.mum && echo [OK] Specific package ready.
 )
-<nul (set /p _msg=Checking client package...)
+echo.
+echo [STEP] Checking client package...
+<nul (set /p _msg=)
 %WLIB% extract %_iw% 1 Windows\Servicing\Packages\*Windows-%_sourSKU%Edition~31bf3856ad364e35*.* --dest-dir="%_cad%" --no-acls --no-attributes %_Nol%
 ren "%_cad%\*Windows-%_sourSKU%Edition~31bf3856ad364e35*.mum" "%_edi%.mum" %_Nol%
 ren "%_cad%\*Windows-%_sourSKU%Edition~31bf3856ad364e35*.cat" "%_edi%.cat" %_Nol%
 set "0=%~f0"& powershell -nop -c "iex ([io.file]::ReadAllText($env:0) -split '[:]%_targSKU%_XML')[1];DelNudes '%_cad%\%_edi%.mum' '%_bld%'"
 :_getonexml
 call :_OneXML
-mkdir %MT% %_log% %_lp% %_scDir% %_sxs% %_Nol% && Echo  ready.
+mkdir %MT% %_log% %_lp% %_scDir% %_sxs% %_Nol% && echo [OK] Directories created.
 call :_Teet 2
 if exist %_sxs%\ (
   %<%:1f " Process "%>>% & %<%:4f " Get %_targSKU% edition files required "%>>% & %<%:f0 " Please wait "%>%
   If exist "%_cad%\1.xml" (Move /y "%_cad%\1.xml" "%_unXml%" %_Nol%)
   If exist "%_cad%\%_edi%.*" (Move /y "%_cad%\%_edi%.*" %ROOT%\%_sxs%\ %_Nol%)
   Echo:
-  <nul (Set /p _msg=Extract Windows %_targSKU% specific edition esd...)
+  echo [STEP] Extracting Windows %_targSKU% specific edition esd...
+  <nul (Set /p _msg=)
   if /i %_targSKU% == WNC (
     %WLIB% extract "%_edPack%" 1 --dest-dir="%ROOT%\%_sxs%" --no-acls --no-attributes --quiet %_Nol%
     %WLIB% extract "%_edPackW%" 1 --dest-dir="%ROOT%\%_sxs%" --no-acls --no-attributes --quiet %_Nol%
 	Call :_export ":NXT_64\:.*" "%ROOT%\%_sxs%\Microsoft-Windows-EditionPack-NXT-Package~31bf3856ad364e35~amd64~~10.0.26100.1.mum" "ASCII" "1"
 	Call :_export ":NXT_wow\:.*" "%ROOT%\%_sxs%\Microsoft-Windows-EditionPack-NXT-WOW64-Package~31bf3856ad364e35~amd64~~10.0.26100.1.mum" "ASCII" "1"
   )
-  %WLIB% extract "%_esp%" 1 --dest-dir="%ROOT%\%_sxs%" --no-acls --no-attributes --quiet %_Nol% && Echo  Done. || Call :_Warn "Failed getting specific edition."
+  %WLIB% extract "%_esp%" 1 --dest-dir="%ROOT%\%_sxs%" --no-acls --no-attributes --quiet %_Nol% && echo [OK] Edition files extracted. || Call :_Warn "Failed getting specific edition."
 ) else (Call :_Warn "sxs folder does not exist!!")
 If exist %_lp%\ (
-  <nul (Set /p _msg=Extract Windows language package...)
-  %z7% x "%_lpp%" -o"%ROOT%\%_lp%" -y %_Nol% && Echo  Done. || Call :_Warn "Failed getting language package."
+  echo.
+  echo [STEP] Extracting Windows language package...
+  <nul (Set /p _msg=)
+  %z7% x "%_lpp%" -o"%ROOT%\%_lp%" -y %_Nol% && echo [OK] Language package extracted. || Call :_Warn "Failed getting language package."
 ) else (Call :_Warn "Lp folder does not exist!!")
 Call :_Teet 2
+echo.
+echo [STEP] Mounting Windows image for servicing...
 %<%:4f " Building "%>>% & %<%:f0 " Map %_iw% to a folder for servicing "%>%
-%DISM% /logpath:%_log%\mounts.log /LogLevel:1 /ScratchDir:%_scDir% /Mount-Image /ImageFile:%_iw% /index:1 /MountDir:%MT% || Call :_Warn "Failed mounting image."
+%DISM% /logpath:%_log%\mounts.log /LogLevel:1 /ScratchDir:%_scDir% /Mount-Image /ImageFile:%_iw% /index:1 /MountDir:%MT% && echo [OK] Image mounted. || Call :_Warn "Failed mounting image."
 if %_bld% equ 25398 (
 %WLIB% extract "%_cad%\%_targSKU%.esd" 1 --dest-dir="%ROOT%\%_sxs%" --no-acls --no-attributes --quiet %_Nol%
 call :_prerec
 )
+echo.
+echo [STEP] Processing Edge and Defender options...
 call :_%_msedge%msedge
 call :_%_defender%defender
 %nsudo% cmd /c del /f /q "%mt%\Windows\servicing\Sessions\*" %_Nol%
 Call :_Teet 2
+echo.
+echo [STEP] Starting %_targSKU% edition conversion...
 %<%:4f " Building "%>>% & %<%:f0 " Start building %_targSKU% "%>%
-%DISM% /logpath:%_log%\convert.log %DismFmt% /Apply-Unattend:%_unXml% 2>Nul || Call :_Warn "Apply unattend has Fail."
+%DISM% /logpath:%_log%\convert.log %DismFmt% /Apply-Unattend:%_unXml% && echo [OK] Edition conversion started. || Call :_Warn "Apply unattend has Fail."
 Call :_Teet 2
 %<%:1f " Integrate "%>>% & %<%:f0 " Integrate client language package "%>%
 echo:
@@ -289,11 +312,28 @@ Goto :_End
 
 :_MenuTarget
 setlocal EnableDelayedExpansion
+set "_skipMenu=0"
 if exist Bedi.ini (
 for /f "tokens=*" %%# in ('Findstr /i "=" Bedi.ini 2^<Nul') do (
 set "%%#"
 set "_oldcfg=%%#,!_oldcfg!"
 ) )
+REM Auto-skip menu if Bedi.ini has complete config and matches expected values
+if exist Bedi.ini (
+if defined _sourSKU if defined _targSKU if defined _store if defined _defender if defined _msedge if defined _helospeech if defined _winre if defined _wifirtl (
+REM Check if config matches - if yes, skip menu
+set "_skipMenu=1"
+echo.
+echo [AUTO] Bedi.ini found with complete configuration - Skipping menu selection
+echo [AUTO] Source SKU: !_sourSKU! - Target SKU: !_targSKU!
+echo [AUTO] Store: !_store! - Defender: !_defender! - Edge: !_msedge! - WinRE: !_winre!
+echo.
+) )
+if %_skipMenu% equ 1 (
+REM Config is ready, skip menu and continue
+endlocal
+goto :eof
+)
 set "_targSKU=Pro_to_EnterpriseG,Pro_to_EnterpriseS,Pro_to_WNC,Core_to_Starter,Server_to_EnterpriseS,Server_to_EnterpriseG"
 :_disp
 cls

@@ -96,7 +96,7 @@ for /f "tokens=3-5 delims=~" %%a in ('%z7% l -ba "%_iw%" -r "windows\servicing\p
 )
 for /f "tokens=3-4 delims=." %%a in ('echo %_version%') do (
 set "_bld=%%a"
-if %%b geq 2 (Call :_Warn "Service Pack Build number not supported: %%b")
+if defined %%b (echo [INFO] Servicing build detected: %%b)
 )
 if /i "%_arc%"=="amd64" (set "_uarc=x64") else (Call :_Warn "Only support amd64 architecture, current: %_arc%")
 set "_cad=%ROOT%\%_bld%"

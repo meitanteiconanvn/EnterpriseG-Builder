@@ -1325,17 +1325,23 @@ jobs:
             
             # Read new output
             if (Test-Path $outputFile) {
-                $fileStream = [System.IO.File]::OpenRead($outputFile)
-                $fileStream.Position = $lastPosition
-                $reader = New-Object System.IO.StreamReader($fileStream)
-                
-                while ($null -ne ($line = $reader.ReadLine())) {
-                    Write-Host $line
+                try {
+                    # Use FileShare.ReadWrite to allow reading while process is writing
+                    $fileStream = [System.IO.File]::Open($outputFile, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+                    $fileStream.Position = $lastPosition
+                    $reader = New-Object System.IO.StreamReader($fileStream)
+                    
+                    while ($null -ne ($line = $reader.ReadLine())) {
+                        Write-Host $line
+                    }
+                    
+                    $lastPosition = $fileStream.Position
+                    $reader.Close()
+                    $fileStream.Close()
+                } catch {
+                    # File might be locked briefly, skip this iteration
+                    Start-Sleep -Milliseconds 500
                 }
-                
-                $lastPosition = $fileStream.Position
-                $reader.Close()
-                $fileStream.Close()
             }
             
             # Also check error file
@@ -1359,16 +1365,20 @@ jobs:
         
         # Read any remaining output
         if (Test-Path $outputFile) {
-            $fileStream = [System.IO.File]::OpenRead($outputFile)
-            $fileStream.Position = $lastPosition
-            $reader = New-Object System.IO.StreamReader($fileStream)
-            
-            while ($null -ne ($line = $reader.ReadLine())) {
-                Write-Host $line
+            try {
+                $fileStream = [System.IO.File]::Open($outputFile, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+                $fileStream.Position = $lastPosition
+                $reader = New-Object System.IO.StreamReader($fileStream)
+                
+                while ($null -ne ($line = $reader.ReadLine())) {
+                    Write-Host $line
+                }
+                
+                $reader.Close()
+                $fileStream.Close()
+            } catch {
+                Write-Warning "Could not read remaining output: $_"
             }
-            
-            $reader.Close()
-            $fileStream.Close()
         }
         
         Write-Host ""
@@ -1410,17 +1420,21 @@ jobs:
                         }
                         
                         if (Test-Path $outputFile) {
-                            $fileStream = [System.IO.File]::OpenRead($outputFile)
-                            $fileStream.Position = $lastPosition2
-                            $reader = New-Object System.IO.StreamReader($fileStream)
-                            
-                            while ($null -ne ($line = $reader.ReadLine())) {
-                                Write-Host $line
+                            try {
+                                $fileStream = [System.IO.File]::Open($outputFile, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+                                $fileStream.Position = $lastPosition2
+                                $reader = New-Object System.IO.StreamReader($fileStream)
+                                
+                                while ($null -ne ($line = $reader.ReadLine())) {
+                                    Write-Host $line
+                                }
+                                
+                                $lastPosition2 = $fileStream.Position
+                                $reader.Close()
+                                $fileStream.Close()
+                            } catch {
+                                Start-Sleep -Milliseconds 500
                             }
-                            
-                            $lastPosition2 = $fileStream.Position
-                            $reader.Close()
-                            $fileStream.Close()
                         }
                     }
                     
@@ -1429,16 +1443,20 @@ jobs:
                     
                     # Read remaining output
                     if (Test-Path $outputFile) {
-                        $fileStream = [System.IO.File]::OpenRead($outputFile)
-                        $fileStream.Position = $lastPosition2
-                        $reader = New-Object System.IO.StreamReader($fileStream)
-                        
-                        while ($null -ne ($line = $reader.ReadLine())) {
-                            Write-Host $line
+                        try {
+                            $fileStream = [System.IO.File]::Open($outputFile, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+                            $fileStream.Position = $lastPosition2
+                            $reader = New-Object System.IO.StreamReader($fileStream)
+                            
+                            while ($null -ne ($line = $reader.ReadLine())) {
+                                Write-Host $line
+                            }
+                            
+                            $reader.Close()
+                            $fileStream.Close()
+                        } catch {
+                            Write-Warning "Could not read remaining output: $_"
                         }
-                        
-                        $reader.Close()
-                        $fileStream.Close()
                     }
                     
                     if ($exitCode2 -ne 0) {

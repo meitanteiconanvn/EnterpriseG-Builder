@@ -625,12 +625,12 @@ jobs:
                 } else {
                   Write-Warning "ADK download process exited with code: $($process.ExitCode)"
                 }
-              
-              # Clean up installer only if it was downloaded (not if it's local)
-              if ($adkInstaller -like "*\adksetup.exe" -and $adkInstaller -notlike "*Files\adksetup.exe") {
-                Remove-Item $adkInstaller -Force -ErrorAction SilentlyContinue
-              }
-            } catch {
+                
+                # Clean up installer only if it was downloaded (not if it's local)
+                if ($adkInstaller -like "*\adksetup.exe" -and $adkInstaller -notlike "*Files\adksetup.exe") {
+                  Remove-Item $adkInstaller -Force -ErrorAction SilentlyContinue
+                }
+              } catch {
               Write-Warning "Failed to download/install Windows ADK: $_"
               Write-Host "Error details: $($_.Exception.Message)"
               Write-Host "Will use WSL mkisofs as fallback for ISO creation if oscdimg is not found."

@@ -1307,8 +1307,8 @@ jobs:
         if (Test-Path $outputFile) { Remove-Item $outputFile -Force }
         if (Test-Path $errorFile) { Remove-Item $errorFile -Force }
         
-        # Start process in background to monitor output
-        $process = Start-Process -FilePath "run-bedi-auto.cmd" -WorkingDirectory $PWD -NoNewWindow -PassThru -RedirectStandardOutput $outputFile -RedirectStandardError $errorFile
+        # Start process using PowerShell automation script
+        $process = Start-Process -FilePath "pwsh.exe" -ArgumentList "-File", "bedi-automation.ps1" -WorkingDirectory $PWD -NoNewWindow -PassThru -RedirectStandardOutput $outputFile -RedirectStandardError $errorFile
         
         Write-Host "Bedi.cmd process started (PID: $($process.Id))"
         Write-Host "Monitoring output in realtime..."

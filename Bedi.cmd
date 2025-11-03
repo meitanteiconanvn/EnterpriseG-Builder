@@ -88,7 +88,11 @@ if "%_hasUpdates%"=="1" (
   echo [OK] No update packages found in image.
 )
 For /f "tokens=3 delims=: " %%# in ('%WLIB% info "%_iw%" 1 2^>Nul ^| Findstr /i /c:"Edition ID:"') do (Set "_eid=%%#")
-if /i not "%_eid%"=="%_sourSKU%" (Echo ==*^|WARNING:  Continuing with detected edition %_eid%  ^|*==)
+if /i not "%_eid%"=="%_sourSKU%" (
+  Echo ==*^|WARNING:  Continuing with detected edition %_eid%  ^|*==
+  set "_sourSKU=%_eid%"
+  Echo [INFO] Adjusted source SKU to detected edition: %_sourSKU%
+)
 if /i "%_eid%" == "ServerDatacenter" (
 for /f "tokens=3-5 delims=~" %%a in ('%z7% l -ba "%_iw%" -r "windows\servicing\packages\Microsoft-Windows-Server-LanguagePack-Package~*.cat"') do (set "_arc=%%a"&set "_lang=%%b"&set "_version=%%~nc")
 ) else (

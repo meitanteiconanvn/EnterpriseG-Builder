@@ -1125,8 +1125,8 @@ title Implementing Provisioned Packages  ~  #%_vbedi%
 echo:
 set "_skappx="
 set "_apxstore=store,DesktopAppInstaller,HEIFImageExtension,HEVCVideoExtension,VP9VideoExtensions,WebMediaExtensions,WebpImageExtension"
-if /i %_defender% == Without (set "_skappx=SecHealthUI")
-if /i %_store% == Without (if defined _skappx (set "_skappx=%_skappx%,%_apxstore%") else (set "_skappx=%_apxstore%"))
+if /i "%_defender%" == "Without" (set "_skappx=SecHealthUI")
+if /i "%_store%" == "Without" (if defined _skappx (set "_skappx=%_skappx%,%_apxstore%") else (set "_skappx=%_apxstore%"))
 setlocal EnableDelayedExpansion
 set _appxs=msixbundle,appxbundle,appx,msix
 set _lic=

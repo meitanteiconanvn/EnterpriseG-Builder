@@ -240,9 +240,9 @@ REM Apply unattend with scratch dir; on 0x800f0831, attempt component cleanup th
     echo [WARNING] Detected 0x800f0831 - running StartComponentCleanup /ResetBase and retrying...
     %DISM% /logpath:%_log%\cleanup_unattend.log /LogLevel:1 /ScratchDir:%_scDir% %DismFmt% /Cleanup-Image /StartComponentCleanup /ResetBase %_Nol%
     %DISM% /logpath:%_log%\convert_retry.log /LogLevel:1 /ScratchDir:%_scDir% %DismFmt% /Apply-Unattend:%_unXml% && (
-      echo [OK] Edition conversion started (retry).
+      echo [OK] Edition conversion started - retry.
     ) || (
-      Call :_Warn "Apply unattend has Fail (0x800f0831 after retry)."
+      Call :_Warn "Apply unattend has Fail - 0x800f0831 after retry."
     )
   ) || (
     Call :_Warn "Apply unattend has Fail."

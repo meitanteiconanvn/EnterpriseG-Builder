@@ -779,29 +779,133 @@ jobs:
           Write-Host "Copying install.esd from ISO..."
           Copy-Item -Path $sourceEsd -Destination $tempEsdPath -Force
           
-          # Convert ESD to WIM using wimlib-imagex
-          # wimlib-imagex export command: export <source_wim_or_esd> <index> <destination_wim>
-          # First, get info to see available indexes
-          Write-Host "Getting ESD info to determine available indexes..."
+          # IMPORTANT: Extract build number from ESD BEFORE converting (ESD has better metadata)
+          Write-Host "Extracting build number from ESD before conversion..."
           $esdInfo = & $wimlibPath info $tempEsdPath 2>&1 | Out-String
           Write-Host "ESD Info:"
           Write-Host $esdInfo
           
-          # Export all indexes from ESD to WIM
-          # Using "all" to export all indexes
+          # Parse build number from ESD info
+          $esdLines = $esdInfo -split "`n"
+          $esdCurrentIndex = 0
+          $esdBuildNumberByIndex = @{}
+          $esdDetectedBuildNumber = $null
+          
+          foreach ($line in $esdLines) {
+            # Method 1: From Version string
+            if ($line -match "Version:\s+10\.0\.(\d+)\.(\d+)") {
+              $buildNum = $matches[1]
+              if ($esdCurrentIndex -gt 0) {
+                $esdBuildNumberByIndex[$esdCurrentIndex] = $buildNum
+              }
+              if (-not $esdDetectedBuildNumber) {
+                $esdDetectedBuildNumber = $buildNum
+                Write-Host "Detected build number from ESD: $esdDetectedBuildNumber (index $esdCurrentIndex)"
+              }
+            }
+            
+            # Method 2: From DisplayVersion/Build
+            if ($line -match "DisplayVersion.*Build[:\s]+(\d+)" -or $line -match "Build[:\s]+(\d{5})") {
+              $buildNum = $matches[1]
+              if ($esdCurrentIndex -gt 0) {
+                $esdBuildNumberByIndex[$esdCurrentIndex] = $buildNum
+              }
+              if (-not $esdDetectedBuildNumber -and $buildNum.Length -ge 4) {
+                $esdDetectedBuildNumber = $buildNum
+                Write-Host "Detected build number from ESD DisplayVersion: $esdDetectedBuildNumber"
+              }
+            }
+            
+            # Track current index
+            if ($line -match "Index:\s+(\d+)") {
+              $esdCurrentIndex = [int]$matches[1]
+            }
+            
+            # Also check for Professional edition to get its build number
+            if ($line -match "Edition ID:\s+Professional$" -or $line -match "Edition ID:\s+Professional\s*$") {
+              if ($esdBuildNumberByIndex.ContainsKey($esdCurrentIndex)) {
+                $esdDetectedBuildNumber = $esdBuildNumberByIndex[$esdCurrentIndex]
+                Write-Host "Using build number from Professional edition in ESD: $esdDetectedBuildNumber"
+              }
+            }
+          }
+          
+          # Save build number from ESD if found
+          if ($esdDetectedBuildNumber -and $esdDetectedBuildNumber -match "^\d{4,6}$") {
+            $detectedBuildNumber = $esdDetectedBuildNumber
+            Write-Host "✓ Build number extracted from ESD: $detectedBuildNumber" -ForegroundColor Green
+            Set-Content -Path "detected_build_number.txt" -Value $detectedBuildNumber
+          } else {
+            Write-Warning "Could not extract build number from ESD info. Will try again after conversion."
+          }
+          
+          # Convert ESD to WIM using wimlib-imagex
+          # wimlib-imagex export command: export <source_wim_or_esd> <index> <destination_wim>
           Write-Host "Converting ESD to WIM (this may take several minutes)..."
+          Write-Host "Note: Using 'all' to export all indexes..."
+          
+          # Try export with all indexes first
           $convertArgs = @("export", $tempEsdPath, "all", $sourceWimPath, "--compress=none")
           $convertProcess = Start-Process -FilePath $wimlibPath -ArgumentList $convertArgs -Wait -PassThru -NoNewWindow
           
           if ($convertProcess.ExitCode -ne 0) {
-            Write-Error "Failed to convert ESD to WIM. Exit code: $($convertProcess.ExitCode)"
-            Remove-Item $tempEsdPath -Force -ErrorAction SilentlyContinue
-            Dismount-DiskImage -ImagePath $isoPath
-            exit 1
+            Write-Warning "Export with 'all' failed (exit code: $($convertProcess.ExitCode)). Trying export by individual indexes..."
+            
+            # Fallback: Export each index individually
+            $indexesToExport = @()
+            foreach ($line in $esdLines) {
+              if ($line -match "Index:\s+(\d+)") {
+                $idx = [int]$matches[1]
+                if ($idx -notin $indexesToExport) {
+                  $indexesToExport += $idx
+                }
+              }
+            }
+            
+            if ($indexesToExport.Count -gt 0) {
+              Write-Host "Found indexes to export: $($indexesToExport -join ', ')"
+              
+              # Export first index to create WIM
+              $firstIndex = $indexesToExport[0]
+              Write-Host "Exporting first index ($firstIndex) to create WIM..."
+              $convertArgsFirst = @("export", $tempEsdPath, $firstIndex.ToString(), $sourceWimPath, "--compress=none")
+              $convertProcessFirst = Start-Process -FilePath $wimlibPath -ArgumentList $convertArgsFirst -Wait -PassThru -NoNewWindow
+              
+              if ($convertProcessFirst.ExitCode -eq 0) {
+                Write-Host "First index exported successfully. Appending other indexes..."
+                
+                # Append remaining indexes
+                for ($i = 1; $i -lt $indexesToExport.Count; $i++) {
+                  $idx = $indexesToExport[$i]
+                  Write-Host "Appending index $idx..."
+                  $appendArgs = @("export", $tempEsdPath, $idx.ToString(), $sourceWimPath, "--compress=none")
+                  $appendProcess = Start-Process -FilePath $wimlibPath -ArgumentList $appendArgs -Wait -PassThru -NoNewWindow
+                  
+                  if ($appendProcess.ExitCode -ne 0) {
+                    Write-Warning "Failed to append index $idx (exit code: $($appendProcess.ExitCode))"
+                  }
+                }
+              } else {
+                Write-Error "Failed to export first index. Exit code: $($convertProcessFirst.ExitCode)"
+                Remove-Item $tempEsdPath -Force -ErrorAction SilentlyContinue
+                Dismount-DiskImage -ImagePath $isoPath
+                exit 1
+              }
+            } else {
+              Write-Error "Could not determine indexes to export from ESD"
+              Remove-Item $tempEsdPath -Force -ErrorAction SilentlyContinue
+              Dismount-DiskImage -ImagePath $isoPath
+              exit 1
+            }
           }
           
           Write-Host "Successfully converted install.esd to install.wim"
           Remove-Item $tempEsdPath -Force -ErrorAction SilentlyContinue
+          
+          # If build number was already detected from ESD, skip WIM analysis
+          if ($detectedBuildNumber) {
+            Write-Host "Build number already detected from ESD: $detectedBuildNumber"
+          }
         } else {
           Write-Host "Copying install.wim from ISO..."
           Copy-Item -Path $sourceWim -Destination $sourceWimPath -Force

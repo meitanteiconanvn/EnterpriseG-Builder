@@ -158,8 +158,18 @@ set "_esp=%_cad%\clients.esd" && set "_sourSKU=ServerDatacenterCor"
 goto :_getonexml
 ) else (
 %z7% e -aoa "%_esp%" update.mum %_Nol%
-findstr /i "\"%_version%\"" update.mum %_Nol% || (del /f /q update.mum & call :_Warn "Wrong edition specific package version!!")
-findstr /i "Microsoft-Windows-EditionSpecific-%_targSKU%" update.mum %_Nol% || (del /f /q update.mum & call :_Warn "Wrong edition for specific package file")
+REM Accept servicing versions: allow 10.0.%_bld%.X patterns in update.mum
+set "_verPrefix=10.0.%_bld%."
+findstr /i "\"%_version%\"" update.mum %_Nol% >nul 2>&1
+if errorlevel 1 (
+  findstr /i "%_verPrefix%" update.mum %_Nol% >nul 2>&1 || (
+    del /f /q update.mum
+    call :_Warn "Wrong edition specific package version!!"
+  )
+)
+findstr /i "Microsoft-Windows-EditionSpecific-%_targSKU%" update.mum %_Nol% >nul 2>&1 || (
+  del /f /q update.mum & call :_Warn "Wrong edition for specific package file"
+)
 del /f /q update.mum && echo [OK] Specific package ready.
 )
 echo.

@@ -72,6 +72,10 @@ Echo ===========================================================================
 Echo.
 Echo.
 %<%:cf " Prepare "%>>% & %<%:3f " Checking all payload files necessary "%>>% & %<%:f0 " Please wait "%>%
+REM Auto-select matching source index and, if needed, reduce to single-index WIM
+set "_srcIndex=1"
+for /f "tokens=3 delims=: " %%# in ('%WLIB% info "%_iw%" 2^>Nul ^| Findstr /i /c:"Image Count:"') do (set "_imgCount=%%#")
+call :_AutoSelectIndex
 REM Check for update packages and remove them automatically
 echo [STEP] Checking for update packages in image...
 set "_hasUpdates=0"
@@ -83,9 +87,8 @@ echo [OK] Update packages removal completed.
 ) else (
 echo [OK] No update packages found in image.
 )
-For /f "tokens=3 delims=: " %%# in ('%WLIB% info "%_iw%" 2^>Nul ^| Findstr /i /c:"Image Count:"') do (If %%# geq 2 Call :_Warn "Only need professional edition alone.")
 For /f "tokens=3 delims=: " %%# in ('%WLIB% info "%_iw%" 1 2^>Nul ^| Findstr /i /c:"Edition ID:"') do (Set "_eid=%%#")
-if /i not "%_eid%"=="%_sourSKU%" (Call :_Warn "This source image is not %_sourSKU% edition!")
+if /i not "%_eid%"=="%_sourSKU%" (Echo ==*^|WARNING:  Continuing with detected edition %_eid%  ^|*==)
 if /i "%_eid%" == "ServerDatacenter" (
 for /f "tokens=3-5 delims=~" %%a in ('%z7% l -ba "%_iw%" -r "windows\servicing\packages\Microsoft-Windows-Server-LanguagePack-Package~*.cat"') do (set "_arc=%%a"&set "_lang=%%b"&set "_version=%%~nc")
 ) else (
@@ -501,19 +504,60 @@ ping 127.0.0.1 -n %* >Nul
 Echo:
 Exit /b
 
+:_AutoSelectIndex
+REM Auto select the source index matching %_sourSKU% and reduce to single-index WIM if necessary
+setlocal EnableDelayedExpansion
+set "_foundIdx="
+set "_lastIdx="
+for /f "usebackq tokens=1,* delims=:" %%A in (`%WLIB% info "%_iw%" 2^>Nul`) do (
+  set "_k=%%~A"
+  set "_v=%%~B"
+  if /i "!_k!"=="Index" (
+    for /f "tokens=1 delims= " %%I in ("!_v!") do set "_lastIdx=%%I"
+  )
+  if /i "!_k!"=="Edition ID" (
+    for /f "tokens=1 delims= " %%E in ("!_v!") do set "_ed=%%E"
+    if /i "!_ed!"=="%_sourSKU%" set "_foundIdx=!_lastIdx!"
+  )
+)
+if defined _imgCount if %_imgCount% GEQ 2 (
+  if not defined _foundIdx (
+    echo [WARNING] Could not find edition %_sourSKU% in multi-index image. Using index 1.
+    set "_foundIdx=1"
+  )
+  if not "!_foundIdx!"=="1" (
+    echo [INFO] Exporting index !_foundIdx! (%_sourSKU%) to single-index WIM...
+    set "_reducedWim=%ROOT%\reduced_%RANDOM%.wim"
+    %WLIB% export "%_iw%" !_foundIdx! "!_reducedWim!" --compress=LZX:100 --check --solid %_Nol% || (
+      echo [WARNING] Export failed; continuing with original image.
+    )
+    if exist "!_reducedWim!" (
+      endlocal & set "_iw=%ROOT%\reduced_%RANDOM%.wim"
+      goto :_AutoSelectIndex_done
+    )
+  )
+)
+endlocal
+:_AutoSelectIndex_done
+Exit /b
+
 :_RemoveUpdatePackages
 REM Function to automatically remove update packages from WIM
 echo [STEP] Removing update packages from Windows image...
 setlocal EnableDelayedExpansion
-set "_tempMount=%ROOT%\temp_cleanup_mnt"
-set "_tempExt=%RANDOM% * 400 / 32768 + 1"
-set /a "_tempExt=%RANDOM% * 400 / 32768 + 1"
-set "_tempMount=%ROOT%\temp_cleanup%_tempExt%"
+set "_tempExt=0"
+set /a _tempExt=%RANDOM% * 400 / 32768 + 1
+set "_cleanupRoot=%ROOT%\cleanup_%_tempExt%"
+set "_tempMount=%_cleanupRoot%\mnt"
+set "_tempScratch=%_cleanupRoot%\scratch"
+set "_tempLogs=%_cleanupRoot%\logs"
 REM Create temp mount directory
 if not exist "%_tempMount%" mkdir "%_tempMount%" %_Nol%
+if not exist "%_tempScratch%" mkdir "%_tempScratch%" %_Nol%
+if not exist "%_tempLogs%" mkdir "%_tempLogs%" %_Nol%
 REM Mount WIM temporarily
 echo [STEP] Mounting image temporarily to remove update packages...
-%DISM% /logpath:%_log%\cleanup_mount.log /LogLevel:1 /ScratchDir:%_scDir% /Mount-Image /ImageFile:%_iw% /index:1 /MountDir:%_tempMount% %_Nol%
+%DISM% /logpath:%_tempLogs%\cleanup_mount.log /LogLevel:1 /ScratchDir:%_tempScratch% /Mount-Image /ImageFile:%_iw% /index:1 /MountDir:%_tempMount% %_Nol%
 if %ERRORLEVEL% neq 0 (
 echo [WARNING] Failed to mount image for cleanup. Skipping update package removal.
 endlocal
@@ -526,19 +570,19 @@ powershell -nologo -noni -nop -exec bypass -c "$packages = Get-ChildItem -Path '
 REM Also try using DISM to remove packages
 for /f "tokens=*" %%p in ('powershell -nologo -noni -nop -exec bypass -c "Get-ChildItem -Path '%_tempMount%\Windows\servicing\Packages' -Filter '*_for_KB*.mum' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name"') do (
 echo [STEP] Removing package: %%p
-%DISM% /Quiet /Logpath:%_log%\cleanup_pkg.log /ScratchDir:%_scDir% /image:%_tempMount% /Remove-Package /PackageName:%%p %_Nol% 2>nul
+%DISM% /Quiet /Logpath:%_tempLogs%\cleanup_pkg.log /ScratchDir:%_tempScratch% /image:%_tempMount% /Remove-Package /PackageName:%%p %_Nol% 2>nul
 )
 REM Commit changes
 echo [STEP] Committing changes...
-%DISM% /logpath:%_log%\cleanup_commit.log /LogLevel:1 /ScratchDir:%_scDir% /Unmount-wim /Mountdir:%_tempMount% /Commit %_Nol%
+%DISM% /logpath:%_tempLogs%\cleanup_commit.log /LogLevel:1 /ScratchDir:%_tempScratch% /Unmount-wim /Mountdir:%_tempMount% /Commit %_Nol%
 if %ERRORLEVEL% neq 0 (
 echo [WARNING] Failed to commit changes. Attempting discard...
-%DISM% /logpath:%_log%\cleanup_discard.log /LogLevel:1 /ScratchDir:%_scDir% /Unmount-wim /Mountdir:%_tempMount% /Discard %_Nol%
+%DISM% /logpath:%_tempLogs%\cleanup_discard.log /LogLevel:1 /ScratchDir:%_tempScratch% /Unmount-wim /Mountdir:%_tempMount% /Discard %_Nol%
 endlocal
 exit /b
 )
 REM Cleanup temp mount directory
-if exist "%_tempMount%" rmdir /s /q "%_tempMount%" %_Nol%
+if exist "%_cleanupRoot%" rmdir /s /q "%_cleanupRoot%" %_Nol%
 echo [OK] Update packages removed successfully.
 endlocal
 Exit /b

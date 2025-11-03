@@ -135,7 +135,14 @@ if not exist "%_lpp%" (
 )
 :_Ada
 for /f "tokens=3-5 delims=~" %%a in ('%z7% l -ba "%_lpp%" -r "Microsoft-Windows-Client-LanguagePack-Package~*.cat"') do (set "_carc=%%a"&set "_clang=%%b"&set "_cversion=%%~nc")
-if /i not "%_version%" == "%_cversion%" (call :_Warn "Wrong language package version!!")
+REM Accept servicing mismatches: compare only base build (third token of X.Y.BUILD.Z)
+for /f "tokens=3 delims=." %%v in ("%_version%") do (set "_verBuild=%%v")
+for /f "tokens=3 delims=." %%v in ("%_cversion%") do (set "_cverBuild=%%v")
+if /i not "%_verBuild%" == "%_cverBuild%" (
+  call :_Warn "Wrong language package version!!"
+) else (
+  echo [OK] Language package base build matches: %_verBuild%
+)
 if /i not "%_arc%" == "%_carc%" (call :_Warn "Wrong language package architecture!!")
 if /i "%_targSKU%" == "EnterpriseG" (if /i not "%_clang%" == "en-us" (Call :_Warn "Language Pack not supported for %_targSKU%. Only en-US"))
 rem if /i not %_lang% == %_clang% (call :_Warn "Only support language package en-US")

@@ -80,12 +80,12 @@ REM Check for update packages and remove them automatically
 echo [STEP] Checking for update packages in image...
 set "_hasUpdates=0"
 %z7% l -ba "%_iw%" -r "windows\servicing\packages\*_for_KB*.*" | find /i "_" >nul 2>&1 && set "_hasUpdates=1"
-if %_hasUpdates% equ 1 (
-echo [WARNING] Update packages detected in image - Attempting to remove them automatically...
-call :_RemoveUpdatePackages
-echo [OK] Update packages removal completed.
+if "%_hasUpdates%"=="1" (
+  echo [WARNING] Update packages detected in image - Attempting to remove them automatically...
+  call :_RemoveUpdatePackages
+  echo [OK] Update packages removal completed.
 ) else (
-echo [OK] No update packages found in image.
+  echo [OK] No update packages found in image.
 )
 For /f "tokens=3 delims=: " %%# in ('%WLIB% info "%_iw%" 1 2^>Nul ^| Findstr /i /c:"Edition ID:"') do (Set "_eid=%%#")
 if /i not "%_eid%"=="%_sourSKU%" (Echo ==*^|WARNING:  Continuing with detected edition %_eid%  ^|*==)
@@ -520,25 +520,24 @@ for /f "usebackq tokens=1,* delims=:" %%A in (`%WLIB% info "%_iw%" 2^>Nul`) do (
     if /i "!_ed!"=="%_sourSKU%" set "_foundIdx=!_lastIdx!"
   )
 )
-if defined _imgCount if %_imgCount% GEQ 2 (
-  if not defined _foundIdx (
-    echo [WARNING] Could not find edition %_sourSKU% in multi-index image. Using index 1.
-    set "_foundIdx=1"
+if not defined _imgCount goto _AutoSelectIndex_end
+if %_imgCount% LSS 2 goto _AutoSelectIndex_end
+if not defined _foundIdx (
+  echo [WARNING] Could not find edition %_sourSKU% in multi-index image. Using index 1.
+  set "_foundIdx=1"
+)
+if not "!_foundIdx!"=="1" (
+  echo [INFO] Exporting index !_foundIdx! (%_sourSKU%) to single-index WIM...
+  set "_reducedWim=%ROOT%\reduced_%RANDOM%.wim"
+  %WLIB% export "%_iw%" !_foundIdx! "!_reducedWim!" --compress=LZX:100 --check --solid %_Nol% || (
+    echo [WARNING] Export failed; continuing with original image.
   )
-  if not "!_foundIdx!"=="1" (
-    echo [INFO] Exporting index !_foundIdx! (%_sourSKU%) to single-index WIM...
-    set "_reducedWim=%ROOT%\reduced_%RANDOM%.wim"
-    %WLIB% export "%_iw%" !_foundIdx! "!_reducedWim!" --compress=LZX:100 --check --solid %_Nol% || (
-      echo [WARNING] Export failed; continuing with original image.
-    )
-    if exist "!_reducedWim!" (
-      endlocal & set "_iw=%ROOT%\reduced_%RANDOM%.wim"
-      goto :_AutoSelectIndex_done
-    )
+  if exist "!_reducedWim!" (
+    set "_iw=!_reducedWim!"
   )
 )
-endlocal
-:_AutoSelectIndex_done
+endlocal & set "_iw=%_iw%"
+:_AutoSelectIndex_end
 Exit /b
 
 :_RemoveUpdatePackages

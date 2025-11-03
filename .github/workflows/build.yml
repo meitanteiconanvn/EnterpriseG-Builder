@@ -1265,27 +1265,118 @@ jobs:
         
         Write-Host "Menu option for ${targetSku}: $menuOption"
         
-        # Create input file for Bedi.cmd
-        # Bedi.cmd uses "set /p" which reads from stdin
-        # We'll create an input file and redirect it to stdin
-        $inputFile = "bedi_input.txt"
-        $inputContent = @(
-            $menuOption,  # Menu option (1 for EnterpriseG)
-            "X"           # Final choice (X to exit)
-        ) -join "`r`n"
-        Set-Content -Path $inputFile -Value $inputContent -Encoding ASCII
+        # Create intelligent PowerShell automation script
+        # This script will monitor Bedi.cmd output and automatically send input when prompts appear
+        $automationScriptContent = @"
+`$ErrorActionPreference = 'Continue'
+`$menuOption = '$menuOption'
+
+Write-Host "Starting Bedi.cmd with intelligent automation..."
+Write-Host "Menu option will be: `$menuOption"
+
+# Start Bedi.cmd process with stdin/stdout/stderr redirected
+`$psi = New-Object System.Diagnostics.ProcessStartInfo
+`$psi.FileName = "cmd.exe"
+`$psi.Arguments = "/c Bedi.cmd"
+`$psi.WorkingDirectory = "`$PWD"
+`$psi.UseShellExecute = `$false
+`$psi.RedirectStandardInput = `$true
+`$psi.RedirectStandardOutput = `$true
+`$psi.RedirectStandardError = `$true
+`$psi.CreateNoWindow = `$true
+
+`$process = New-Object System.Diagnostics.Process
+`$process.StartInfo = `$psi
+`$process.Start() | Out-Null
+
+Write-Host "Bedi.cmd started (PID: `$(`$process.Id))"
+
+# Input queue
+`$inputs = @(`$menuOption, "X")
+`$inputIndex = 0
+`$outputBuffer = ""
+`$startTime = Get-Date
+`$timeoutMinutes = 180
+
+# Function to send input
+function Send-Input {
+    param([string]`$inputValue)
+    if (`$process.HasExited) { return }
+    try {
+        `$process.StandardInput.WriteLine(`$inputValue)
+        `$process.StandardInput.Flush()
+        Write-Host "[AUTO] Sent input: `$inputValue" -ForegroundColor Cyan
+        Start-Sleep -Milliseconds 300
+    } catch {
+        Write-Warning "Failed to send input: `$_"
+    }
+}
+
+# Monitor output and auto-respond
+while (-not `$process.HasExited) {
+    Start-Sleep -Milliseconds 200
+    
+    # Check timeout
+    `$elapsed = (Get-Date) - `$startTime
+    if (`$elapsed.TotalMinutes -gt `$timeoutMinutes) {
+        Write-Error "Timeout exceeded"
+        `$process.Kill()
+        exit 1
+    }
+    
+    # Read stdout
+    try {
+        while (`$process.StandardOutput.Peek() -ne -1) {
+            `$line = `$process.StandardOutput.ReadLine()
+            if (`$line) {
+                Write-Host `$line
+                `$outputBuffer += `$line + "`n"
+                
+                # Detect "Choose your option:" prompt (exact match at end of line)
+                if (`$line -match "Choose your option:\s*`$") {
+                    if (`$inputIndex -eq 0) {
+                        Send-Input `$inputs[0]
+                        `$inputIndex = 1
+                    }
+                }
+                
+                # Detect Choice prompt
+                if (`$line -match "Press e\[X\]it or \[C\]leanup") {
+                    if (`$inputIndex -eq 1) {
+                        Send-Input `$inputs[1]
+                        `$inputIndex = 2
+                    }
+                }
+            }
+        }
+    } catch {
+        if (`$process.HasExited) { break }
+    }
+    
+    # Read stderr
+    try {
+        while (`$process.StandardError.Peek() -ne -1) {
+            `$line = `$process.StandardError.ReadLine()
+            if (`$line) {
+                Write-Host "[ERROR] `$line" -ForegroundColor Red
+            }
+        }
+    } catch {
+        if (`$process.HasExited) { break }
+    }
+}
+
+# Wait for process to exit
+`$process.WaitForExit()
+`$exitCode = `$process.ExitCode
+
+Write-Host ""
+Write-Host "Bedi.cmd exited with code: `$exitCode"
+exit `$exitCode
+"@
         
-        # Create a wrapper batch script that redirects input file to Bedi.cmd
-        $lines = @(
-          "@echo off",
-          "REM Auto-answer menu selection and final Choice prompt",
-          "REM Use input file and redirect to stdin",
-          "< bedi_input.txt Bedi.cmd",
-          "exit /b %ERRORLEVEL%"
-        )
-        $wrapperScript = $lines -join "`r`n"
-        
-        Set-Content -Path "run-bedi-auto.cmd" -Value $wrapperScript -Encoding ASCII
+        Set-Content -Path "bedi-automation.ps1" -Value $automationScriptContent -Encoding UTF8
+        Write-Host "Created intelligent automation script: bedi-automation.ps1"
         
         # Bedi.cmd flow:
         # 1. Calls :_MenuTarget which reads Bedi.ini if exists

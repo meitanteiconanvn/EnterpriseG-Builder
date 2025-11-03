@@ -313,25 +313,34 @@ Goto :_End
 :_MenuTarget
 setlocal EnableDelayedExpansion
 set "_skipMenu=0"
+REM Read Bedi.ini first if exists
 if exist Bedi.ini (
 for /f "tokens=*" %%# in ('Findstr /i "=" Bedi.ini 2^<Nul') do (
 set "%%#"
 set "_oldcfg=%%#,!_oldcfg!"
 ) )
-REM Auto-skip menu if Bedi.ini has complete config and matches expected values
+REM Auto-skip menu if Bedi.ini has complete config
+REM Check if all required variables are defined
 if exist Bedi.ini (
-if defined _sourSKU if defined _targSKU if defined _store if defined _defender if defined _msedge if defined _helospeech if defined _winre if defined _wifirtl (
-REM Check if config matches - if yes, skip menu
+if defined _sourSKU (
+if defined _targSKU (
+if defined _store (
+if defined _defender (
+if defined _msedge (
+if defined _helospeech (
+if defined _winre (
+if defined _wifirtl (
+REM All variables are defined - skip menu
 set "_skipMenu=1"
 echo.
 echo [AUTO] Bedi.ini found with complete configuration - Skipping menu selection
 echo [AUTO] Source SKU: !_sourSKU! - Target SKU: !_targSKU!
 echo [AUTO] Store: !_store! - Defender: !_defender! - Edge: !_msedge! - WinRE: !_winre!
 echo.
-) )
-if %_skipMenu% equ 1 (
-REM Config is ready, skip menu and continue
-endlocal
+))))))))
+if !_skipMenu! equ 1 (
+REM Config is ready, skip menu and continue - preserve variables
+endlocal & set "_sourSKU=%_sourSKU%" & set "_targSKU=%_targSKU%" & set "_store=%_store%" & set "_defender=%_defender%" & set "_msedge=%_msedge%" & set "_helospeech=%_helospeech%" & set "_winre=%_winre%" & set "_wifirtl=%_wifirtl%"
 goto :eof
 )
 set "_targSKU=Pro_to_EnterpriseG,Pro_to_EnterpriseS,Pro_to_WNC,Core_to_Starter,Server_to_EnterpriseS,Server_to_EnterpriseG"

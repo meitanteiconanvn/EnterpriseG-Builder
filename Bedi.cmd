@@ -166,7 +166,7 @@ if "%_verOk%"=="0" (
   findstr /i "%_verPrefix%" update.mum >nul 2>&1 && set "_verOk=1"
 )
 if "%_verOk%"=="1" (
-  echo [OK] Specific package version is compatible (base build %_bld%).
+  echo [OK] Specific package version is compatible - base build %_bld%.
 ) else (
   echo [WARNING] Could not verify specific package version; continuing...
 )

@@ -742,17 +742,70 @@ jobs:
         
         Write-Host "ISO mounted to drive: $driveLetter`:"
         
-        # Extract install.wim from sources folder
+        # Check for install.wim or install.esd in sources folder
         $sourceWim = "${driveLetter}:\sources\install.wim"
+        $sourceEsd = "${driveLetter}:\sources\install.esd"
+        $sourceImageFile = $null
+        $isEsd = $false
         
-        if (-not (Test-Path $sourceWim)) {
-          Write-Error "install.wim not found in ISO sources folder"
+        if (Test-Path $sourceWim) {
+          Write-Host "Found install.wim in ISO sources folder"
+          $sourceImageFile = $sourceWim
+          $isEsd = $false
+        } elseif (Test-Path $sourceEsd) {
+          Write-Host "Found install.esd in ISO sources folder (will convert to WIM)"
+          $sourceImageFile = $sourceEsd
+          $isEsd = $true
+        } else {
+          Write-Error "Neither install.wim nor install.esd found in ISO sources folder"
           Dismount-DiskImage -ImagePath $isoPath
           exit 1
         }
         
-        Write-Host "Copying install.wim from ISO..."
-        Copy-Item -Path $sourceWim -Destination $sourceWimPath -Force
+        # If it's ESD, convert to WIM first
+        if ($isEsd) {
+          Write-Host "Converting install.esd to install.wim..."
+          $wimlibPath = "$PWD\Files\wimlib-imagex.exe"
+          
+          if (-not (Test-Path $wimlibPath)) {
+            Write-Error "wimlib-imagex.exe not found. Cannot convert ESD to WIM."
+            Write-Host "Please ensure wimlib-imagex.exe is available in Files folder."
+            Dismount-DiskImage -ImagePath $isoPath
+            exit 1
+          }
+          
+          # Copy ESD file first
+          $tempEsdPath = "$PWD\source_install.esd"
+          Write-Host "Copying install.esd from ISO..."
+          Copy-Item -Path $sourceEsd -Destination $tempEsdPath -Force
+          
+          # Convert ESD to WIM using wimlib-imagex
+          # wimlib-imagex export command: export <source_wim_or_esd> <index> <destination_wim>
+          # First, get info to see available indexes
+          Write-Host "Getting ESD info to determine available indexes..."
+          $esdInfo = & $wimlibPath info $tempEsdPath 2>&1 | Out-String
+          Write-Host "ESD Info:"
+          Write-Host $esdInfo
+          
+          # Export all indexes from ESD to WIM
+          # Using "all" to export all indexes
+          Write-Host "Converting ESD to WIM (this may take several minutes)..."
+          $convertArgs = @("export", $tempEsdPath, "all", $sourceWimPath, "--compress=none")
+          $convertProcess = Start-Process -FilePath $wimlibPath -ArgumentList $convertArgs -Wait -PassThru -NoNewWindow
+          
+          if ($convertProcess.ExitCode -ne 0) {
+            Write-Error "Failed to convert ESD to WIM. Exit code: $($convertProcess.ExitCode)"
+            Remove-Item $tempEsdPath -Force -ErrorAction SilentlyContinue
+            Dismount-DiskImage -ImagePath $isoPath
+            exit 1
+          }
+          
+          Write-Host "Successfully converted install.esd to install.wim"
+          Remove-Item $tempEsdPath -Force -ErrorAction SilentlyContinue
+        } else {
+          Write-Host "Copying install.wim from ISO..."
+          Copy-Item -Path $sourceWim -Destination $sourceWimPath -Force
+        }
         
         # Also copy ISO structure for later ISO recreation
         # Optimize robocopy with multi-threading and better performance

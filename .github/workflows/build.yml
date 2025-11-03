@@ -251,39 +251,40 @@ jobs:
           }
           
           try {
-          $ProgressPreference = 'SilentlyContinue'
-          
-          if (Test-Path $isoPath) {
-            $existingSize = (Get-Item $isoPath).Length
-            try {
-              $request = [System.Net.HttpWebRequest]::Create($isoUrl)
-              $request.Method = "HEAD"
-              $response = $request.GetResponse()
-              $contentLength = $response.ContentLength
-              $response.Close()
-              
-              if ($existingSize -lt $contentLength -and $contentLength -gt 0) {
-                Write-Host "Resuming download from $([math]::Round($existingSize / 1MB, 2)) MB..." -ForegroundColor Yellow
-                Download-WithProgress -Url $isoUrl -Destination $isoPath -ExistingSize $existingSize
-              } else {
+            $ProgressPreference = 'SilentlyContinue'
+            
+            if (Test-Path $isoPath) {
+              $existingSize = (Get-Item $isoPath).Length
+              try {
+                $request = [System.Net.HttpWebRequest]::Create($isoUrl)
+                $request.Method = "HEAD"
+                $response = $request.GetResponse()
+                $contentLength = $response.ContentLength
+                $response.Close()
+                
+                if ($existingSize -lt $contentLength -and $contentLength -gt 0) {
+                  Write-Host "Resuming download from $([math]::Round($existingSize / 1MB, 2)) MB..." -ForegroundColor Yellow
+                  Download-WithProgress -Url $isoUrl -Destination $isoPath -ExistingSize $existingSize
+                } else {
+                  Write-Host "Starting fresh download..." -ForegroundColor Yellow
+                  Remove-Item $isoPath -Force
+                  Download-WithProgress -Url $isoUrl -Destination $isoPath
+                }
+              } catch {
                 Write-Host "Starting fresh download..." -ForegroundColor Yellow
-                Remove-Item $isoPath -Force
+                Remove-Item $isoPath -Force -ErrorAction SilentlyContinue
                 Download-WithProgress -Url $isoUrl -Destination $isoPath
               }
-            } catch {
-              Write-Host "Starting fresh download..." -ForegroundColor Yellow
-              Remove-Item $isoPath -Force -ErrorAction SilentlyContinue
+            } else {
               Download-WithProgress -Url $isoUrl -Destination $isoPath
             }
-          } else {
-            Download-WithProgress -Url $isoUrl -Destination $isoPath
+            
+            $isoSize = (Get-Item $isoPath).Length / 1GB
+            Write-Host "ISO size: $([math]::Round($isoSize, 2)) GB" -ForegroundColor Green
+          } catch {
+            Write-Error "Failed to download ISO: $_"
+            exit 1
           }
-          
-          $isoSize = (Get-Item $isoPath).Length / 1GB
-          Write-Host "ISO size: $([math]::Round($isoSize, 2)) GB" -ForegroundColor Green
-        } catch {
-          Write-Error "Failed to download ISO: $_"
-          exit 1
         }
         
         if (-not (Test-Path $isoPath)) {

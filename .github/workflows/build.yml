@@ -68,6 +68,33 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
       
+    - name: Install aria2c for faster downloads
+      shell: pwsh
+      run: |
+        # Check if aria2c is already available
+        $aria2cAvailable = Get-Command aria2c -ErrorAction SilentlyContinue
+        
+        if (-not $aria2cAvailable) {
+          Write-Host "aria2c not found. Installing via Chocolatey..." -ForegroundColor Yellow
+          
+          # Try Chocolatey first
+          $chocoAvailable = Get-Command choco -ErrorAction SilentlyContinue
+          
+          if ($chocoAvailable) {
+            try {
+              choco install aria2 -y --no-progress
+              Write-Host "✓ aria2c installed successfully via Chocolatey" -ForegroundColor Green
+            } catch {
+              Write-Warning "Chocolatey installation failed: $_"
+            }
+          } else {
+            Write-Host "Chocolatey not available. aria2c will not be installed." -ForegroundColor Yellow
+            Write-Host "Workflow will use PowerShell download method (slower)." -ForegroundColor Yellow
+          }
+        } else {
+          Write-Host "✓ aria2c is already available" -ForegroundColor Green
+        }
+      
     - name: Download Windows ISO
       shell: pwsh
       run: |

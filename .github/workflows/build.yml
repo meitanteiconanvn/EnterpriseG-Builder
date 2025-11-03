@@ -1428,97 +1428,26 @@ jobs:
         Write-Host "Note: Menu option '$menuOption' will be auto-selected, and 'X' will be chosen at the end"
         Write-Host ""
         
-        # Start process and monitor output in realtime
-        $outputFile = "bedi_output.txt"
-        $errorFile = "bedi_error.txt"
+        # Run automation script directly (output will stream to console)
+        # Don't redirect to file - let it stream directly to GitHub Actions console
+        $automationScript = Get-Content "bedi-automation.ps1" -Raw
         
-        # Clear previous output files
-        if (Test-Path $outputFile) { Remove-Item $outputFile -Force }
-        if (Test-Path $errorFile) { Remove-Item $errorFile -Force }
-        
-        # Start process using PowerShell automation script
-        $process = Start-Process -FilePath "pwsh.exe" -ArgumentList "-File", "bedi-automation.ps1" -WorkingDirectory $PWD -NoNewWindow -PassThru -RedirectStandardOutput $outputFile -RedirectStandardError $errorFile
-        
-        Write-Host "Bedi.cmd process started (PID: $($process.Id))"
-        Write-Host "Monitoring output in realtime..."
+        Write-Host "Starting Bedi.cmd automation..."
+        Write-Host "=" * 80
         Write-Host ""
         
-        # Monitor output file in realtime
-        $lastPosition = 0
-        $startTime = Get-Date
-        $timeoutMinutes = 180  # 3 hours timeout
-        
-        while (-not $process.HasExited) {
-            Start-Sleep -Seconds 2
-            
-            # Check for timeout
-            $elapsed = (Get-Date) - $startTime
-            if ($elapsed.TotalMinutes -gt $timeoutMinutes) {
-                Write-Error "Bedi.cmd process exceeded timeout of $timeoutMinutes minutes"
-                Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
-                exit 1
-            }
-            
-            # Read new output
-            if (Test-Path $outputFile) {
-                try {
-                    # Use FileShare.ReadWrite to allow reading while process is writing
-                    $fileStream = [System.IO.File]::Open($outputFile, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
-                    $fileStream.Position = $lastPosition
-                    $reader = New-Object System.IO.StreamReader($fileStream)
-                    
-                    while ($null -ne ($line = $reader.ReadLine())) {
-                        Write-Host $line
-                    }
-                    
-                    $lastPosition = $fileStream.Position
-                    $reader.Close()
-                    $fileStream.Close()
-                } catch {
-                    # File might be locked briefly, skip this iteration
-                    Start-Sleep -Milliseconds 500
-                }
-            }
-            
-            # Also check error file
-            if (Test-Path $errorFile) {
-                $errorContent = Get-Content $errorFile -ErrorAction SilentlyContinue
-                if ($errorContent -and $errorContent.Count -gt 0) {
-                    Write-Host "[ERROR] $($errorContent[-1])" -ForegroundColor Red
-                }
-            }
-            
-            # Show progress every 30 seconds
-            $elapsedSeconds = [math]::Floor($elapsed.TotalSeconds)
-            if ($elapsedSeconds % 30 -eq 0 -and $elapsedSeconds -gt 0) {
-                Write-Host "[Progress] Bedi.cmd has been running for $([math]::Floor($elapsed.TotalMinutes)) minutes..." -ForegroundColor Yellow
-            }
-        }
-        
-        # Wait for process to fully exit
-        $process.WaitForExit()
-        $exitCode = $process.ExitCode
-        
-        # Read any remaining output
-        if (Test-Path $outputFile) {
-            try {
-                $fileStream = [System.IO.File]::Open($outputFile, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
-                $fileStream.Position = $lastPosition
-                $reader = New-Object System.IO.StreamReader($fileStream)
-                
-                while ($null -ne ($line = $reader.ReadLine())) {
-                    Write-Host $line
-                }
-                
-                $reader.Close()
-                $fileStream.Close()
-            } catch {
-                Write-Warning "Could not read remaining output: $_"
-            }
-        }
+        # Execute the automation script directly - output will stream in realtime
+        & pwsh.exe -File "bedi-automation.ps1"
+        $exitCode = $LASTEXITCODE
         
         Write-Host ""
-        Write-Host "Bedi.cmd process exited with code: $exitCode"
+        Write-Host "=" * 80
+        Write-Host "Bedi.cmd automation completed with exit code: $exitCode"
+        
+        if ($exitCode -ne 0) {
+            Write-Warning "Bedi.cmd process exited with code: $exitCode"
+            exit $exitCode
+        }
         
         # Check if Bedi exited because it updated config (exit code 0 but menu was shown)
         if ($exitCode -eq 0) {

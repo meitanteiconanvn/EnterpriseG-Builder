@@ -80,8 +80,59 @@ jobs:
         $isoPath = "$PWD\source.iso"
         Write-Host "Downloading ISO..." -ForegroundColor Cyan
         
-        # Function to show download progress with speed
-        function Download-WithProgress {
+        # Try aria2c first (multi-connection, much faster)
+        $aria2cAvailable = Get-Command aria2c -ErrorAction SilentlyContinue
+        
+        if ($aria2cAvailable) {
+          Write-Host "Using aria2c with multi-connection download (faster)..." -ForegroundColor Green
+          try {
+            # aria2c options:
+            # -x 16: max 16 connections per server
+            # -s 16: split file into 16 segments
+            # --file-allocation=none: don't pre-allocate (faster start)
+            # --max-connection-per-server=16: max connections
+            # --min-split-size=1M: minimum split size
+            # --continue: resume if exists
+            # --console-log-level=error: reduce log output
+            
+            $aria2cArgs = @(
+              "-x", "16",
+              "-s", "16",
+              "--file-allocation=none",
+              "--max-connection-per-server=16",
+              "--min-split-size=1M",
+              "--continue",
+              "--console-log-level=error",
+              "--summary-interval=1",
+              "-d", $PWD,
+              "-o", "source.iso",
+              $isoUrl
+            )
+            
+            $aria2cProcess = Start-Process -FilePath "aria2c" -ArgumentList $aria2cArgs -Wait -PassThru -NoNewWindow
+            if ($aria2cProcess.ExitCode -eq 0 -and (Test-Path $isoPath)) {
+              $isoSize = (Get-Item $isoPath).Length / 1GB
+              Write-Host "Download completed using aria2c. ISO size: $([math]::Round($isoSize, 2)) GB" -ForegroundColor Green
+            } else {
+              Write-Warning "aria2c download failed, trying PowerShell method..."
+              Remove-Item $isoPath -Force -ErrorAction SilentlyContinue
+              throw "aria2c failed"
+            }
+          } catch {
+            Write-Warning "aria2c download failed: $_"
+            Remove-Item $isoPath -Force -ErrorAction SilentlyContinue
+            $aria2cAvailable = $null
+          }
+        }
+        
+        # Fallback to PowerShell download with progress (if aria2c not available or failed)
+        if (-not $aria2cAvailable -or -not (Test-Path $isoPath)) {
+          if (-not $aria2cAvailable) {
+            Write-Host "aria2c not available. Using PowerShell download (optimized)..." -ForegroundColor Yellow
+          }
+          
+          # Function to show download progress with speed (optimized with larger buffer)
+          function Download-WithProgress {
           param(
             [string]$Url,
             [string]$Destination,
@@ -89,6 +140,8 @@ jobs:
           )
           
           $request = [System.Net.HttpWebRequest]::Create($Url)
+          $request.Timeout = 3600000 # 1 hour timeout
+          $request.ReadWriteTimeout = 3600000
           if ($ExistingSize -gt 0) {
             $request.AddRange($ExistingSize)
           }
@@ -104,6 +157,7 @@ jobs:
           }
           
           $stream = $response.GetResponseStream()
+          $stream.ReadTimeout = 3600000
           
           if ($ExistingSize -gt 0) {
             $fileStream = [System.IO.File]::OpenWrite($Destination)
@@ -114,7 +168,8 @@ jobs:
             $downloadedSize = 0
           }
           
-          $buffer = New-Object byte[] 1MB
+          # Increased buffer size for better performance (4MB instead of 1MB)
+          $buffer = New-Object byte[] 4MB
           $lastUpdate = Get-Date
           $lastSize = $downloadedSize
           $startTime = Get-Date

@@ -511,120 +511,120 @@ jobs:
                 $process = Start-Process -FilePath $adkInstaller -ArgumentList $downloadArgs -Wait -PassThru -NoNewWindow
                 
                 Write-Host "ADK download process exited with code: $($process.ExitCode)"
-              
-              if ($process.ExitCode -eq 0 -or $process.ExitCode -eq 3010) {
-                Write-Host "ADK components downloaded. Looking for oscdimg MSI installer..."
                 
-                # Look for oscdimg MSI installer in the downloaded folder
-                $oscImgMsiPaths = @(
-                  "$downloadFolder\Windows Kits\10\ADK\Installers\Oscdimg (DesktopEditions)-x86_en-us.msi",
-                  "$downloadFolder\Windows Kits\10\ADK\Installers\Oscdimg (DesktopEditions)-amd64_en-us.msi",
-                  "$downloadFolder\Windows Kits\10\ADK\Installers\Oscdimg*.msi"
-                )
-                
-                $oscImgMsi = $null
-                foreach ($msiPath in $oscImgMsiPaths) {
-                  $foundMsi = Get-ChildItem -Path $msiPath -ErrorAction SilentlyContinue | Select-Object -First 1
-                  if ($foundMsi) {
-                    $oscImgMsi = $foundMsi.FullName
-                    Write-Host "Found oscdimg MSI: $oscImgMsi"
-                    break
-                  }
-                }
-                
-                # Also search recursively
-                if (-not $oscImgMsi) {
-                  $foundMsi = Get-ChildItem -Path $downloadFolder -Filter "*Oscdimg*.msi" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-                  if ($foundMsi) {
-                    $oscImgMsi = $foundMsi.FullName
-                    Write-Host "Found oscdimg MSI (recursive search): $oscImgMsi"
-                  }
-                }
-                
-                if ($oscImgMsi -and (Test-Path $oscImgMsi)) {
-                  Write-Host "Installing oscdimg component from MSI..."
-                  # Install MSI silently
-                  # /i: install
-                  # /quiet: silent installation
-                  # /norestart: don't restart
-                  # /l*v: verbose logging
-                  $msiLog = "$PWD\oscdimg_msi_install.log"
-                  $msiArgs = @(
-                    "/i",
-                    "`"$oscImgMsi`"",
-                    "/quiet",
-                    "/norestart",
-                    "/l*v",
-                    "`"$msiLog`""
+                if ($process.ExitCode -eq 0 -or $process.ExitCode -eq 3010) {
+                  Write-Host "ADK components downloaded. Looking for oscdimg MSI installer..."
+                  
+                  # Look for oscdimg MSI installer in the downloaded folder
+                  $oscImgMsiPaths = @(
+                    "$downloadFolder\Windows Kits\10\ADK\Installers\Oscdimg (DesktopEditions)-x86_en-us.msi",
+                    "$downloadFolder\Windows Kits\10\ADK\Installers\Oscdimg (DesktopEditions)-amd64_en-us.msi",
+                    "$downloadFolder\Windows Kits\10\ADK\Installers\Oscdimg*.msi"
                   )
-                  Write-Host "Running: msiexec.exe $($msiArgs -join ' ')"
                   
-                  # GitHub Actions runners usually have admin, so try without RunAs first
-                  try {
-                    $msiProcess = Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -PassThru -NoNewWindow -ErrorAction Stop
-                    Write-Host "oscdimg MSI installation exited with code: $($msiProcess.ExitCode)"
-                  } catch {
-                    Write-Warning "Failed to install MSI: $_"
-                    Write-Host "Error details: $($_.Exception.Message)"
-                    $msiProcess = $null
+                  $oscImgMsi = $null
+                  foreach ($msiPath in $oscImgMsiPaths) {
+                    $foundMsi = Get-ChildItem -Path $msiPath -ErrorAction SilentlyContinue | Select-Object -First 1
+                    if ($foundMsi) {
+                      $oscImgMsi = $foundMsi.FullName
+                      Write-Host "Found oscdimg MSI: $oscImgMsi"
+                      break
+                    }
                   }
                   
-                  if (-not $msiProcess) {
-                    Write-Host "MSI installation failed or was skipped"
-                    Write-Host "oscdimg MSI installation exited with code: -1"
-                    $msiProcess = New-Object PSObject -Property @{ ExitCode = -1 }
+                  # Also search recursively
+                  if (-not $oscImgMsi) {
+                    $foundMsi = Get-ChildItem -Path $downloadFolder -Filter "*Oscdimg*.msi" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+                    if ($foundMsi) {
+                      $oscImgMsi = $foundMsi.FullName
+                      Write-Host "Found oscdimg MSI (recursive search): $oscImgMsi"
+                    }
                   }
                   
-                  # Check MSI log for details
-                  if (Test-Path $msiLog) {
-                    Write-Host "MSI installation log (last 20 lines):"
-                    Get-Content $msiLog -Tail 20 | ForEach-Object { Write-Host $_ }
-                  }
-                  
-                  if ($msiProcess.ExitCode -eq 0 -or $msiProcess.ExitCode -eq 3010) {
-                    Write-Host "Waiting for oscdimg to be available..."
-                    Start-Sleep -Seconds 10
+                  if ($oscImgMsi -and (Test-Path $oscImgMsi)) {
+                    Write-Host "Installing oscdimg component from MSI..."
+                    # Install MSI silently
+                    # /i: install
+                    # /quiet: silent installation
+                    # /norestart: don't restart
+                    # /l*v: verbose logging
+                    $msiLog = "$PWD\oscdimg_msi_install.log"
+                    $msiArgs = @(
+                      "/i",
+                      "`"$oscImgMsi`"",
+                      "/quiet",
+                      "/norestart",
+                      "/l*v",
+                      "`"$msiLog`""
+                    )
+                    Write-Host "Running: msiexec.exe $($msiArgs -join ' ')"
                     
-                    # Check for oscdimg after installation
-                    foreach ($path in $oscdimgPaths) {
-                      if (Test-Path $path) {
-                        $oscdimgPath = $path
-                        $oscdimgFound = $true
-                        Write-Host "oscdimg now available at: $path"
-                        break
-                      }
+                    # GitHub Actions runners usually have admin, so try without RunAs first
+                    try {
+                      $msiProcess = Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -PassThru -NoNewWindow -ErrorAction Stop
+                      Write-Host "oscdimg MSI installation exited with code: $($msiProcess.ExitCode)"
+                    } catch {
+                      Write-Warning "Failed to install MSI: $_"
+                      Write-Host "Error details: $($_.Exception.Message)"
+                      $msiProcess = $null
                     }
                     
-                    # If still not found, search recursively
-                    if (-not $oscdimgFound) {
-                      $adkBasePaths = @(
-                        "${env:ProgramFiles(x86)}\Windows Kits\10\Assessment and Deployment Kit",
-                        "${env:ProgramFiles}\Windows Kits\10\Assessment and Deployment Kit"
-                      )
+                    if (-not $msiProcess) {
+                      Write-Host "MSI installation failed or was skipped"
+                      Write-Host "oscdimg MSI installation exited with code: -1"
+                      $msiProcess = New-Object PSObject -Property @{ ExitCode = -1 }
+                    }
+                    
+                    # Check MSI log for details
+                    if (Test-Path $msiLog) {
+                      Write-Host "MSI installation log (last 20 lines):"
+                      Get-Content $msiLog -Tail 20 | ForEach-Object { Write-Host $_ }
+                    }
+                    
+                    if ($msiProcess.ExitCode -eq 0 -or $msiProcess.ExitCode -eq 3010) {
+                      Write-Host "Waiting for oscdimg to be available..."
+                      Start-Sleep -Seconds 10
                       
-                      foreach ($adkBase in $adkBasePaths) {
-                        if (Test-Path $adkBase) {
-                          Write-Host "Searching for oscdimg.exe in: $adkBase"
-                          $foundOscdimg = Get-ChildItem -Path $adkBase -Filter "oscdimg.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-                          if ($foundOscdimg) {
-                            $oscdimgPath = $foundOscdimg.FullName
-                            $oscdimgFound = $true
-                            Write-Host "Found oscdimg at: $oscdimgPath"
-                            break
+                      # Check for oscdimg after installation
+                      foreach ($path in $oscdimgPaths) {
+                        if (Test-Path $path) {
+                          $oscdimgPath = $path
+                          $oscdimgFound = $true
+                          Write-Host "oscdimg now available at: $path"
+                          break
+                        }
+                      }
+                      
+                      # If still not found, search recursively
+                      if (-not $oscdimgFound) {
+                        $adkBasePaths = @(
+                          "${env:ProgramFiles(x86)}\Windows Kits\10\Assessment and Deployment Kit",
+                          "${env:ProgramFiles}\Windows Kits\10\Assessment and Deployment Kit"
+                        )
+                        
+                        foreach ($adkBase in $adkBasePaths) {
+                          if (Test-Path $adkBase) {
+                            Write-Host "Searching for oscdimg.exe in: $adkBase"
+                            $foundOscdimg = Get-ChildItem -Path $adkBase -Filter "oscdimg.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+                            if ($foundOscdimg) {
+                              $oscdimgPath = $foundOscdimg.FullName
+                              $oscdimgFound = $true
+                              Write-Host "Found oscdimg at: $oscdimgPath"
+                              break
+                            }
                           }
                         }
                       }
                     }
+                  } else {
+                    Write-Warning "Could not find oscdimg MSI installer in downloaded ADK folder"
                   }
+                  
+                  # Clean up download folder
+                  Remove-Item -Path $downloadFolder -Recurse -Force -ErrorAction SilentlyContinue
                 } else {
-                  Write-Warning "Could not find oscdimg MSI installer in downloaded ADK folder"
+                  Write-Warning "ADK download process exited with code: $($process.ExitCode)"
                 }
-                
-                # Clean up download folder
-                Remove-Item -Path $downloadFolder -Recurse -Force -ErrorAction SilentlyContinue
-              } else {
-                Write-Warning "ADK download process exited with code: $($process.ExitCode)"
-              }
               
               # Clean up installer only if it was downloaded (not if it's local)
               if ($adkInstaller -like "*\adksetup.exe" -and $adkInstaller -notlike "*Files\adksetup.exe") {

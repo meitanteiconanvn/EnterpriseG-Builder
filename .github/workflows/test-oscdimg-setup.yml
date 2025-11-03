@@ -1,0 +1,458 @@
+name: Test oscdimg Setup
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-oscdimg-setup:
+    runs-on: windows-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Setup ISO creation tools
+      shell: pwsh
+      run: |
+        Write-Host "Setting up ISO creation tools..."
+        
+        # Check multiple common locations for oscdimg
+        $oscdimgPaths = @(
+          "${env:ProgramFiles(x86)}\Windows Kits\10\Assessment and Deployment Kit\Deployment Tools\amd64\Oscdimg\oscdimg.exe",
+          "${env:ProgramFiles}\Windows Kits\10\Assessment and Deployment Kit\Deployment Tools\amd64\Oscdimg\oscdimg.exe",
+          "${env:ProgramFiles(x86)}\Windows Kits\10\Assessment and Deployment Kit\Deployment Tools\x86\Oscdimg\oscdimg.exe"
+        )
+        
+        $oscdimgFound = $false
+        $oscdimgPath = $null
+        
+        foreach ($path in $oscdimgPaths) {
+          if (Test-Path $path) {
+            $oscdimgPath = $path
+            $oscdimgFound = $true
+            Write-Host "✓ Found oscdimg at: $path" -ForegroundColor Green
+            break
+          }
+        }
+        
+        if (-not $oscdimgFound) {
+          Write-Host "oscdimg not found. Attempting to download oscdimg.exe directly..."
+          
+          # Method 1: Download oscdimg.exe directly using curl.exe (most efficient method)
+          $localOscdimgPath = "$PWD\oscdimg.exe"
+          $oscdimgUrl = "https://msdl.microsoft.com/download/symbols/oscdimg.exe/688CABB065000/oscdimg.exe"
+          
+          # Try curl.exe first (simpler and more efficient)
+          $curlAvailable = Get-Command curl.exe -ErrorAction SilentlyContinue
+          
+          if ($curlAvailable) {
+            try {
+              Write-Host "Downloading oscdimg.exe using curl.exe..."
+              Write-Host "URL: $oscdimgUrl"
+              
+              # Use curl with Microsoft Symbol Server User-Agent and follow redirects
+              $curlArgs = @(
+                "-L",
+                "-A", "Microsoft-Symbol-Server/10.0.0.0",
+                $oscdimgUrl,
+                "-o", $localOscdimgPath
+              )
+              
+              $curlProcess = Start-Process -FilePath "curl.exe" -ArgumentList $curlArgs -Wait -PassThru -NoNewWindow
+              
+              if ($curlProcess.ExitCode -eq 0 -and (Test-Path $localOscdimgPath)) {
+                $fileSize = (Get-Item $localOscdimgPath).Length / 1KB
+                Write-Host "✓ oscdimg.exe downloaded successfully using curl ($([math]::Round($fileSize, 2)) KB)" -ForegroundColor Green
+                
+                # Verify it's a valid executable (should be > 100 KB)
+                if ($fileSize -gt 100) {
+                  $oscdimgPath = $localOscdimgPath
+                  $oscdimgFound = $true
+                  Write-Host "✓ Using downloaded oscdimg.exe: $oscdimgPath" -ForegroundColor Green
+                } else {
+                  Write-Warning "Downloaded file seems too small ($fileSize KB), might be invalid"
+                  Remove-Item $localOscdimgPath -Force -ErrorAction SilentlyContinue
+                }
+              } else {
+                Write-Warning "curl.exe download failed with exit code: $($curlProcess.ExitCode)"
+                Remove-Item $localOscdimgPath -Force -ErrorAction SilentlyContinue
+              }
+            } catch {
+              Write-Warning "Failed to download oscdimg.exe using curl.exe: $_"
+              Remove-Item $localOscdimgPath -Force -ErrorAction SilentlyContinue
+            }
+          }
+          
+          # Method 1b: Fallback to PowerShell download with progress (if curl failed or not available)
+          if (-not $oscdimgFound) {
+            if (-not $curlAvailable) {
+              Write-Host "curl.exe not available. Using PowerShell download method..."
+            } else {
+              Write-Host "curl.exe download failed. Trying PowerShell download method..."
+            }
+            
+            # Function to download with progress
+            function Download-OscdimgWithProgress {
+              param(
+                [string]$Url,
+                [string]$Destination
+              )
+              
+              $request = [System.Net.HttpWebRequest]::Create($Url)
+              $response = $request.GetResponse()
+              
+              $totalSize = $response.ContentLength
+              $stream = $response.GetResponseStream()
+              $fileStream = [System.IO.File]::Create($Destination)
+              
+              $buffer = New-Object byte[] 64KB
+              $downloadedSize = 0
+              $lastUpdate = Get-Date
+              $startTime = Get-Date
+              
+              try {
+                while ($true) {
+                  $bytesRead = $stream.Read($buffer, 0, $buffer.Length)
+                  if ($bytesRead -eq 0) { break }
+                  
+                  $fileStream.Write($buffer, 0, $bytesRead)
+                  $downloadedSize += $bytesRead
+                  
+                  $now = Get-Date
+                  $elapsed = ($now - $lastUpdate).TotalSeconds
+                  
+                  # Update every 0.5 seconds for small file
+                  if ($elapsed -ge 0.5) {
+                    $speed = if ($elapsed -gt 0) { ($downloadedSize / $elapsed) } else { 0 }
+                    $speedKBps = $speed / 1KB
+                    
+                    if ($totalSize -gt 0) {
+                      $percent = [math]::Round(($downloadedSize / $totalSize) * 100, 1)
+                      $downloadedKB = [math]::Round($downloadedSize / 1KB, 1)
+                      $totalKB = [math]::Round($totalSize / 1KB, 1)
+                      $remaining = $totalSize - $downloadedSize
+                      $etaSeconds = if ($speed -gt 0) { [math]::Round($remaining / $speed) } else { 0 }
+                      $eta = [TimeSpan]::FromSeconds($etaSeconds)
+                      
+                      Write-Host "Progress: $percent% ($downloadedKB KB / $totalKB KB) | Speed: $([math]::Round($speedKBps, 1)) KB/s | ETA: $($eta.ToString('ss'))s" -NoNewline
+                      Write-Host "`r" -NoNewline
+                    } else {
+                      $downloadedKB = [math]::Round($downloadedSize / 1KB, 1)
+                      Write-Host "Downloaded: $downloadedKB KB | Speed: $([math]::Round($speedKBps, 1)) KB/s" -NoNewline
+                      Write-Host "`r" -NoNewline
+                    }
+                    
+                    $lastUpdate = $now
+                  }
+                }
+                
+                Write-Host "" # New line after progress
+                $totalTime = (Get-Date) - $startTime
+                $finalSizeKB = [math]::Round($downloadedSize / 1KB, 1)
+                $avgSpeedKBps = if ($totalTime.TotalSeconds -gt 0) { [math]::Round(($downloadedSize / $totalTime.TotalSeconds) / 1KB, 1) } else { 0 }
+                Write-Host "✓ Download completed: $finalSizeKB KB in $($totalTime.TotalSeconds.ToString('F1'))s | Average speed: $avgSpeedKBps KB/s" -ForegroundColor Green
+              } finally {
+                $fileStream.Close()
+                $stream.Close()
+                $response.Close()
+              }
+            }
+            
+            try {
+              $ProgressPreference = 'SilentlyContinue'
+              Download-OscdimgWithProgress -Url $oscdimgUrl -Destination $localOscdimgPath
+              
+              if (Test-Path $localOscdimgPath) {
+                $fileSize = (Get-Item $localOscdimgPath).Length / 1KB
+                
+                # Verify it's a valid executable (should be > 100 KB)
+                if ($fileSize -gt 100) {
+                  $oscdimgPath = $localOscdimgPath
+                  $oscdimgFound = $true
+                  Write-Host "✓ Using downloaded oscdimg.exe: $oscdimgPath" -ForegroundColor Green
+                } else {
+                  Write-Warning "Downloaded file seems too small ($fileSize KB), might be invalid"
+                  Remove-Item $localOscdimgPath -Force -ErrorAction SilentlyContinue
+                }
+              }
+            } catch {
+              Write-Warning "Failed to download oscdimg.exe using PowerShell: $_"
+              Remove-Item $localOscdimgPath -Force -ErrorAction SilentlyContinue
+            }
+          }
+          
+          # Method 2: Try Chocolatey (if both download methods failed)
+          if (-not $oscdimgFound) {
+            Write-Host "Direct download failed. Trying Chocolatey..."
+            $chocoAvailable = Get-Command choco -ErrorAction SilentlyContinue
+            
+            if ($chocoAvailable) {
+              Write-Host "Using Chocolatey to install Windows ADK Deployment Tools..."
+              try {
+                # Install with verbose output
+                $chocoOutput = choco install windows-adk-deployment-tools -y --no-progress 2>&1 | Out-String
+                Write-Host "Chocolatey output: $chocoOutput"
+                
+                # Wait longer for installation to complete
+                Write-Host "Waiting for installation to complete..."
+                Start-Sleep -Seconds 30
+                
+                # Refresh environment variables (they might have changed)
+                $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+                
+                # Check again with expanded paths
+                $expandedPaths = @()
+                foreach ($path in $oscdimgPaths) {
+                  $expandedPaths += $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($path)
+                }
+                
+                foreach ($path in $expandedPaths) {
+                  if (Test-Path $path) {
+                    $oscdimgPath = $path
+                    $oscdimgFound = $true
+                    Write-Host "oscdimg installed via Chocolatey at: $path"
+                    break
+                  }
+                }
+                
+                # Also check Program Files directly
+                if (-not $oscdimgFound) {
+                  $adkBasePaths = @(
+                    "${env:ProgramFiles(x86)}\Windows Kits\10\Assessment and Deployment Kit",
+                    "${env:ProgramFiles}\Windows Kits\10\Assessment and Deployment Kit"
+                  )
+                  
+                  foreach ($adkBase in $adkBasePaths) {
+                    if (Test-Path $adkBase) {
+                      Write-Host "Found Windows ADK at: $adkBase"
+                      # Search recursively for oscdimg.exe
+                      $foundOscdimg = Get-ChildItem -Path $adkBase -Filter "oscdimg.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+                      if ($foundOscdimg) {
+                        $oscdimgPath = $foundOscdimg.FullName
+                        $oscdimgFound = $true
+                        Write-Host "Found oscdimg at: $oscdimgPath"
+                        break
+                      }
+                    }
+                  }
+                }
+              } catch {
+                Write-Warning "Chocolatey installation failed: $_"
+              }
+            }
+          }
+          
+          # Method 3: Try downloading Windows ADK installer and installing oscdimg component (if both above failed)
+          if (-not $oscdimgFound) {
+            Write-Host "Chocolatey method failed or not available. Trying Windows ADK installer..."
+            
+            # Check if adksetup.exe exists locally (in Files folder)
+            $localAdkInstaller = "$PWD\Files\adksetup.exe"
+            $adkInstaller = $null
+            
+            if (Test-Path $localAdkInstaller) {
+              Write-Host "Using local adksetup.exe from Files folder..."
+              $adkInstaller = $localAdkInstaller
+            } else {
+              Write-Host "Local adksetup.exe not found. Downloading Windows ADK installer..."
+              
+              # Use the correct Windows ADK download link
+              $adkUrl = "https://go.microsoft.com/fwlink/?linkid=2289980"
+              $adkInstaller = "$PWD\adksetup.exe"
+              
+              try {
+                $ProgressPreference = 'SilentlyContinue'
+                
+                # Try using WebClient first (handles redirects better)
+                $client = New-Object System.Net.WebClient
+                $client.DownloadFile($adkUrl, $adkInstaller)
+                $client.Dispose()
+                
+                $fileSize = (Get-Item $adkInstaller).Length / 1MB
+                Write-Host "Downloaded installer size: $([math]::Round($fileSize, 2)) MB"
+                
+                # Check if download is actually an installer (should be > 1 MB)
+                if ($fileSize -lt 1) {
+                  Write-Warning "Downloaded file seems too small ($fileSize MB), might be a redirect page."
+                  Remove-Item $adkInstaller -Force -ErrorAction SilentlyContinue
+                  throw "Downloaded file is too small"
+                }
+              } catch {
+                Write-Warning "Failed to download ADK installer: $_"
+                $adkInstaller = $null
+              }
+            }
+            
+            if ($adkInstaller -and (Test-Path $adkInstaller)) {
+              try {
+                Write-Host "Installing Windows ADK (download-only mode, then installing oscdimg component)..."
+                
+                # Step 1: Download ADK components to a folder (don't install yet)
+                # /layout: download only
+                # /quiet: silent mode
+                # /norestart: don't restart
+                $downloadFolder = "$PWD\adk_download"
+                New-Item -ItemType Directory -Path $downloadFolder -Force | Out-Null
+                
+                # Try without features parameter first (more reliable)
+                $downloadArgs = "/layout `"$downloadFolder`" /quiet /norestart"
+                Write-Host "Running: $adkInstaller $downloadArgs"
+                
+                $process = Start-Process -FilePath $adkInstaller -ArgumentList $downloadArgs -Wait -PassThru -NoNewWindow
+                
+                Write-Host "ADK download process exited with code: $($process.ExitCode)"
+                
+                if ($process.ExitCode -eq 0 -or $process.ExitCode -eq 3010) {
+                  Write-Host "ADK components downloaded. Looking for oscdimg MSI installer..."
+                  
+                  # Look for oscdimg MSI installer in the downloaded folder
+                  $oscImgMsiPaths = @(
+                    "$downloadFolder\Windows Kits\10\ADK\Installers\Oscdimg (DesktopEditions)-x86_en-us.msi",
+                    "$downloadFolder\Windows Kits\10\ADK\Installers\Oscdimg (DesktopEditions)-amd64_en-us.msi",
+                    "$downloadFolder\Windows Kits\10\ADK\Installers\Oscdimg*.msi"
+                  )
+                  
+                  $oscImgMsi = $null
+                  foreach ($msiPath in $oscImgMsiPaths) {
+                    $foundMsi = Get-ChildItem -Path $msiPath -ErrorAction SilentlyContinue | Select-Object -First 1
+                    if ($foundMsi) {
+                      $oscImgMsi = $foundMsi.FullName
+                      Write-Host "Found oscdimg MSI: $oscImgMsi"
+                      break
+                    }
+                  }
+                  
+                  # Also search recursively
+                  if (-not $oscImgMsi) {
+                    $foundMsi = Get-ChildItem -Path $downloadFolder -Filter "*Oscdimg*.msi" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+                    if ($foundMsi) {
+                      $oscImgMsi = $foundMsi.FullName
+                      Write-Host "Found oscdimg MSI (recursive search): $oscImgMsi"
+                    }
+                  }
+                  
+                  if ($oscImgMsi -and (Test-Path $oscImgMsi)) {
+                    Write-Host "Installing oscdimg component from MSI..."
+                    # Install MSI silently
+                    # /i: install
+                    # /quiet: silent installation
+                    # /norestart: don't restart
+                    # /l*v: verbose logging
+                    $msiLog = "$PWD\oscdimg_msi_install.log"
+                    $msiArgs = @(
+                      "/i",
+                      "`"$oscImgMsi`"",
+                      "/quiet",
+                      "/norestart",
+                      "/l*v",
+                      "`"$msiLog`""
+                    )
+                    Write-Host "Running: msiexec.exe $($msiArgs -join ' ')"
+                    
+                    # GitHub Actions runners usually have admin, so try without RunAs first
+                    try {
+                      $msiProcess = Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -PassThru -NoNewWindow -ErrorAction Stop
+                      Write-Host "oscdimg MSI installation exited with code: $($msiProcess.ExitCode)"
+                    } catch {
+                      Write-Warning "Failed to install MSI: $_"
+                      Write-Host "Error details: $($_.Exception.Message)"
+                      $msiProcess = $null
+                    }
+                    
+                    if (-not $msiProcess) {
+                      Write-Host "MSI installation failed or was skipped"
+                      Write-Host "oscdimg MSI installation exited with code: -1"
+                      $msiProcess = New-Object PSObject -Property @{ ExitCode = -1 }
+                    }
+                    
+                    # Check MSI log for details
+                    if (Test-Path $msiLog) {
+                      Write-Host "MSI installation log (last 20 lines):"
+                      Get-Content $msiLog -Tail 20 | ForEach-Object { Write-Host $_ }
+                    }
+                    
+                    if ($msiProcess.ExitCode -eq 0 -or $msiProcess.ExitCode -eq 3010) {
+                      Write-Host "Waiting for oscdimg to be available..."
+                      Start-Sleep -Seconds 10
+                      
+                      # Check for oscdimg after installation
+                      foreach ($path in $oscdimgPaths) {
+                        if (Test-Path $path) {
+                          $oscdimgPath = $path
+                          $oscdimgFound = $true
+                          Write-Host "oscdimg now available at: $path"
+                          break
+                        }
+                      }
+                      
+                      # If still not found, search recursively
+                      if (-not $oscdimgFound) {
+                        $adkBasePaths = @(
+                          "${env:ProgramFiles(x86)}\Windows Kits\10\Assessment and Deployment Kit",
+                          "${env:ProgramFiles}\Windows Kits\10\Assessment and Deployment Kit"
+                        )
+                        
+                        foreach ($adkBase in $adkBasePaths) {
+                          if (Test-Path $adkBase) {
+                            Write-Host "Searching for oscdimg.exe in: $adkBase"
+                            $foundOscdimg = Get-ChildItem -Path $adkBase -Filter "oscdimg.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+                            if ($foundOscdimg) {
+                              $oscdimgPath = $foundOscdimg.FullName
+                              $oscdimgFound = $true
+                              Write-Host "Found oscdimg at: $oscdimgPath"
+                              break
+                            }
+                          }
+                        }
+                      }
+                    }
+                  } else {
+                    Write-Warning "Could not find oscdimg MSI installer in downloaded ADK folder"
+                  }
+                  
+                  # Clean up download folder
+                  Remove-Item -Path $downloadFolder -Recurse -Force -ErrorAction SilentlyContinue
+                } else {
+                  Write-Warning "ADK download process exited with code: $($process.ExitCode)"
+                }
+                
+                # Clean up installer only if it was downloaded (not if it's local)
+                if ($adkInstaller -like "*\adksetup.exe" -and $adkInstaller -notlike "*Files\adksetup.exe") {
+                  Remove-Item $adkInstaller -Force -ErrorAction SilentlyContinue
+                }
+              } catch {
+                Write-Warning "Failed to download/install Windows ADK: $_"
+                Write-Host "Error details: $($_.Exception.Message)"
+                Write-Host "Will use WSL mkisofs as fallback for ISO creation if oscdimg is not found."
+              }
+            }
+          }
+        }
+        
+        # Save oscdimg path to environment variable for later steps
+        if ($oscdimgFound) {
+          Write-Host "oscdimg_path=$oscdimgPath" | Out-File -FilePath "$env:GITHUB_ENV" -Encoding utf8 -Append
+        } else {
+          Write-Host "oscdimg_path=" | Out-File -FilePath "$env:GITHUB_ENV" -Encoding utf8 -Append
+        }
+        
+        # Test result
+        if ($oscdimgFound) {
+          Write-Host "✓ SUCCESS: oscdimg.exe is available" -ForegroundColor Green
+          Write-Host "Path: $oscdimgPath"
+          
+          # Test oscdimg execution
+          $ErrorActionPreference = 'SilentlyContinue'
+          & $oscdimgPath 2>&1 | Out-Null
+          $oscdimgExitCode = $LASTEXITCODE
+          $global:LASTEXITCODE = 0
+          
+          if ($oscdimgExitCode -ge 0) {
+            Write-Host "✓ oscdimg.exe executed successfully!" -ForegroundColor Green
+          }
+        } else {
+          Write-Host "✗ FAILED: oscdimg.exe is not available" -ForegroundColor Red
+          exit 1
+        }
+        
+        exit 0
+

@@ -210,7 +210,7 @@ Call :_Teet 2
 %<%:1f " Integrate "%>>% & %<%:f0 " Integrate client language package "%>%
 echo:
 :: Not support multi languages, but Bedi will let you do it. Just watch out yours feature basic, and FoDs languages.
-if /i not %_lang% == %_clang% (
+if /i not "%_lang%" == "%_clang%" (
 echo - Remove old client language package
 %DISM% /Logpath:%_log%\remlp.log %DismFmt% /Remove-Package /PackageName:Microsoft-Windows-Client-LanguagePack-Package~31bf3856ad364e35~%_arc%~%_lang%~%_version%
 Call :_Teet 2
@@ -244,7 +244,7 @@ call :_saveset
 if %_bld% lss 25390 (call :remAppxProv)
 if %_bld% equ 25398 (call :_AddAppxs "%_cad%\uwps")
 call :_AddFODs
-if /i %_msedge% == Without (
+if /i "%_msedge%" == "Without" (
 if exist "%MT%\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" (
 call :_Teet 2
 title Remove Microsoft Edge Package  ~  #%_vbedi%
@@ -255,7 +255,7 @@ echo:
 call :remCapab
 call :remFeatures
 :: Remove windows recovery image
-if /i %_winre% == Without (
+if /i "%_winre%" == "Without" (
 call :_Teet 2
 title Remove Windows Recovery  ~  #%_vbedi%
 %<%:5f " Lite options "%>>% & %<%:f0 " Removing Windows Recovery Image "%>%
@@ -426,12 +426,12 @@ if not defined _opt (Goto :_lis)
 if %_opt% equ 9 (Goto) 2>Nul & Call "%_Files%\ModLCU.cmd"
 if %_opt% equ 10 (Goto) 2>Nul & Call "%_Files%\upmod.cmd"
 if %_opt% equ 11 (Goto) 2>Nul & Call "cleanup.cmd"
-if %_opt% equ 20 (if /i !_store! == With (set "_store=Without"& Goto :_disp) else (set "_store=With"& Goto :_disp))
-if %_opt% equ 21 (if /i !_defender! == With (set "_defender=Without"& Goto :_disp) else (set "_defender=With"& Goto :_disp))
-if %_opt% equ 22 (if /i !_msedge! == With (set "_msedge=Without"& Goto :_disp) else (set "_msedge=With"& Goto :_disp))
-if %_opt% equ 23 (if /i !_helospeech! == With (set "_helospeech=Without"& Goto :_disp) else (set "_helospeech=With"& Goto :_disp))
-if %_opt% equ 24 (if /i !_winre! == With (set "_winre=Without"& Goto :_disp) else (set "_winre=With"& Goto :_disp))
-if %_opt% equ 25 (if /i !_wifirtl! == With (set "_wifirtl=Without"& Goto :_disp) else (set "_wifirtl=With"& Goto :_disp))
+if %_opt% equ 20 (if /i "!_store!" == "With" (set "_store=Without"& Goto :_disp) else (set "_store=With"& Goto :_disp))
+if %_opt% equ 21 (if /i "!_defender!" == "With" (set "_defender=Without"& Goto :_disp) else (set "_defender=With"& Goto :_disp))
+if %_opt% equ 22 (if /i "!_msedge!" == "With" (set "_msedge=Without"& Goto :_disp) else (set "_msedge=With"& Goto :_disp))
+if %_opt% equ 23 (if /i "!_helospeech!" == "With" (set "_helospeech=Without"& Goto :_disp) else (set "_helospeech=With"& Goto :_disp))
+if %_opt% equ 24 (if /i "!_winre!" == "With" (set "_winre=Without"& Goto :_disp) else (set "_winre=With"& Goto :_disp))
+if %_opt% equ 25 (if /i "!_wifirtl!" == "With" (set "_wifirtl=Without"& Goto :_disp) else (set "_wifirtl=With"& Goto :_disp))
 if %_opt% gtr !_No! (Goto :_lis)
 set "_chnm=!_ch%_opt%!"
 if %_opt% equ 0 (Exit)
@@ -1037,8 +1037,8 @@ Exit /b
 
 :_setEnterpriseS
 set "safe_prov=NET.Native|ScreenSketch|SecHealthUI|UI.Xaml|VCLibs"
-if /i %_defender% == Without (set "safe_prov=NET.Native|ScreenSketch|UI.Xaml|VCLibs")
-if /i %_store% == With (set "safe_prov=%safe_prov%|DesktopAppInstaller|Store|HEIFImageExtension|HEVCVideoExtension|VP9VideoExtensions|WebMediaExtensions|WebpImageExtension")
+if /i "%_defender%" == "Without" (set "safe_prov=NET.Native|ScreenSketch|UI.Xaml|VCLibs")
+if /i "%_store%" == "With" (set "safe_prov=%safe_prov%|DesktopAppInstaller|Store|HEIFImageExtension|HEVCVideoExtension|VP9VideoExtensions|WebMediaExtensions|WebpImageExtension")
 exit /b
 
 :_setEnterpriseG
@@ -1047,7 +1047,7 @@ call :MountReg
 reg add "HKLM\mtSOFT\Microsoft\PolicyManager\current\device\Accounts" /f /v "AllowMicrosoftAccountSignInAssistant" /t REG_DWORD /d "1" %_Nol%
 call :UnMountReg
 set "safe_prov=NET.Native|ScreenSketch|UI.Xaml|VCLibs"
-if /i %_store% == With (
+if /i "%_store%" == "With" (
 set "safe_prov=%safe_prov%|DesktopAppInstaller|Store|HEIFImageExtension|HEVCVideoExtension|VP9VideoExtensions|WebMediaExtensions|WebpImageExtension"
 )
 set "_defender=Without"& set "_msedge=Without"
@@ -1246,8 +1246,8 @@ set "0=%~f0"& powershell -nop -c "iex ([io.file]::ReadAllText($env:0) -split '[:
 exit /b
 
 :remCapab
-if /i %_helospeech% == Without (set "rem_cap=Hello.Face|Speech")
-if /i %_wifirtl% == Without (if defined rem_cap (set "rem_cap=%rem_cap%|Rtl8187se|Rtl819xp|Rtl85n64") else (set "rem_cap=Rtl8187se|Rtl819xp|Rtl85n64"))
+if /i "%_helospeech%" == "Without" (set "rem_cap=Hello.Face|Speech")
+if /i "%_wifirtl%" == "Without" (if defined rem_cap (set "rem_cap=%rem_cap%|Rtl8187se|Rtl819xp|Rtl85n64") else (set "rem_cap=Rtl8187se|Rtl819xp|Rtl85n64"))
 if not defined rem_cap (exit /b)
 Call :_Teet 2
 title Remove Capabilites Packages  -  #%_vbedi%
@@ -1263,7 +1263,7 @@ echo %_seps%
 exit /b
 
 :remFeatures
-if /i %_defender% == Without (set "_sFeat=Defender|Platform|BitLocker")
+if /i "%_defender%" == "Without" (set "_sFeat=Defender|Platform|BitLocker")
 if not defined _sFeat (exit /b)
 title Remove Feature Packages  -  #%_vbedi%
 call :_Teet 2

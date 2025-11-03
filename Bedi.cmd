@@ -108,8 +108,8 @@ If not exist "%ROOT%\%_bld%" (Call :_Warn "The payload files not ready in %_bld%
 setlocal EnableDelayedExpansion
 echo !_sup%_targSKU%! | find /i "%_bld%" %_Nol% || Call :_Warn "%_targSKU% SKU only support build !_sup%_targSKU%!. The current build is %_bld%."
 endlocal
-if /i %_targSKU% == EnterpriseG (
-if /i not %_lang% == en-us (Call :_Warn "Language Pack not supported for %_targSKU%. Only en-US")
+if /i "%_targSKU%" == "EnterpriseG" (
+if /i not "%_lang%" == "en-us" (Call :_Warn "Language Pack not supported for %_targSKU%. Only en-US")
 set "_msedge=Without"& set "_defender=Without")
 if %_vwin% equ 10 (call :_neutralizer)
 Set "_unXml=%ROOT%\%_sxs%\%_bld%.xml"
@@ -135,9 +135,9 @@ if not exist "%_lpp%" (
 )
 :_Ada
 for /f "tokens=3-5 delims=~" %%a in ('%z7% l -ba "%_lpp%" -r "Microsoft-Windows-Client-LanguagePack-Package~*.cat"') do (set "_carc=%%a"&set "_clang=%%b"&set "_cversion=%%~nc")
-if /i not %_version% == %_cversion% (call :_Warn "Wrong language package version!!")
-if /i not %_arc% == %_carc% (call :_Warn "Wrong language package architecture!!")
-if /i %_targSKU% == EnterpriseG (if /i not %_clang% == en-us (Call :_Warn "Language Pack not supported for %_targSKU%. Only en-US"))
+if /i not "%_version%" == "%_cversion%" (call :_Warn "Wrong language package version!!")
+if /i not "%_arc%" == "%_carc%" (call :_Warn "Wrong language package architecture!!")
+if /i "%_targSKU%" == "EnterpriseG" (if /i not "%_clang%" == "en-us" (Call :_Warn "Language Pack not supported for %_targSKU%. Only en-US"))
 rem if /i not %_lang% == %_clang% (call :_Warn "Only support language package en-US")
 echo [OK] Language package ready.
 echo.
@@ -173,7 +173,7 @@ if exist %_sxs%\ (
   Echo:
   echo [STEP] Extracting Windows %_targSKU% specific edition esd...
   <nul (Set /p _msg=)
-  if /i %_targSKU% == WNC (
+  if /i "%_targSKU%" == "WNC" (
     %WLIB% extract "%_edPack%" 1 --dest-dir="%ROOT%\%_sxs%" --no-acls --no-attributes --quiet %_Nol%
     %WLIB% extract "%_edPackW%" 1 --dest-dir="%ROOT%\%_sxs%" --no-acls --no-attributes --quiet %_Nol%
 	Call :_export ":NXT_64\:.*" "%ROOT%\%_sxs%\Microsoft-Windows-EditionPack-NXT-Package~31bf3856ad364e35~amd64~~10.0.26100.1.mum" "ASCII" "1"
@@ -437,8 +437,8 @@ set "_chnm=!_ch%_opt%!"
 if %_opt% equ 0 (Exit)
 for /f "tokens=1 delims=_" %%# in ("%_chnm%") do (set "_isserv=%%#")
 for /f "tokens=3 delims=_" %%# in ("%_chnm%") do (set "_targSKU=%%#")
-if /i %_isserv% == Server (set "_sourSKU=ServerDatacenter") else (set "_sourSKU=Professional")
-if /i %_targSKU% == Starter (set "_sourSKU=Core")
+if /i "%_isserv%" == "Server" (set "_sourSKU=ServerDatacenter") else (set "_sourSKU=Professional")
+if /i "%_targSKU%" == "Starter" (set "_sourSKU=Core")
 set "_newcfg=_sourSKU=!_sourSKU!,_targSKU=!_targSKU!,_store=!_store!,_defender=!_defender!,_msedge=!_msedge!,_helospeech=!_helospeech!,_winre=!_winre!,_wifirtl=!_wifirtl!,"
 if /i not !_oldcfg! == !_newcfg! (
 >Bedi.ini (
@@ -1077,7 +1077,7 @@ if exist "%_cad%\fods\*.cab" (set "_fodext=%_cad%\fods\*.cab") else (if exist "%
 if exist "%_cad%\fodlp\*.cab" (set "_fodextlp=%_cad%\fodlp\*.cab") else (if exist "%_cad%\fodlp\*.esd" (set "_fodextlp=%_cad%\fodlp\*.esd"))
 if not defined _fodext (exit /b) else (set "_fodext=%_cad%\fods"& set "_fodextlp=%_cad%\fodlp")
 call :_Teet 2
-if /i %_targSKU% == EnterpriseG (set "_notforg=notepad,MSPaint,SnippingTool")
+if /i "%_targSKU%" == "EnterpriseG" (set "_notforg=notepad,MSPaint,SnippingTool")
 title Implementing %_targSKU% FOD Packages  ~  #%_vbedi%
 %<%:5f " Customize "%>>% & %<%:f0 " Implement some %_targSKU% FoD packages "%>%
 echo:

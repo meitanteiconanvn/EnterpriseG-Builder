@@ -1265,15 +1265,22 @@ jobs:
         
         Write-Host "Menu option for ${targetSku}: $menuOption"
         
-        # Create a wrapper batch script that:
-        # 1. Pipes menu option number to Bedi.cmd for menu selection
-        # 2. Pipes "X" to Bedi.cmd for the Choice prompt at the end
-        # Note: Bedi.cmd will read Bedi.ini first, but if config doesn't match exactly,
-        # it will show menu and wait for input. We pipe the menu option to handle this.
+        # Create input file for Bedi.cmd
+        # Bedi.cmd uses "set /p" which reads from stdin
+        # We'll create an input file and redirect it to stdin
+        $inputFile = "bedi_input.txt"
+        $inputContent = @(
+            $menuOption,  # Menu option (1 for EnterpriseG)
+            "X"           # Final choice (X to exit)
+        ) -join "`r`n"
+        Set-Content -Path $inputFile -Value $inputContent -Encoding ASCII
+        
+        # Create a wrapper batch script that redirects input file to Bedi.cmd
         $lines = @(
           "@echo off",
           "REM Auto-answer menu selection and final Choice prompt",
-          "(echo $menuOption & echo X) | Bedi.cmd",
+          "REM Use input file and redirect to stdin",
+          "< bedi_input.txt Bedi.cmd",
           "exit /b %ERRORLEVEL%"
         )
         $wrapperScript = $lines -join "`r`n"

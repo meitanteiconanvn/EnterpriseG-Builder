@@ -71,7 +71,7 @@ Echo o-------------------------------- THE CONSTRUCTION Of %_bldUpp% -----------
 Echo ========================================================================================================
 Echo.
 Echo.
-%<%:cf " Prepare "%>>% & %<%:3f " Checking all payload files necessary "%>>% & %<%:f0 " Please wait "%>%
+echo [STEP] Prepare: Checking all payload files necessary... Please wait
 REM Auto-select matching source index and, if needed, reduce to single-index WIM
 set "_srcIndex=1"
 for /f "tokens=3 delims=: " %%# in ('%WLIB% info "%_iw%" 2^>Nul ^| Findstr /i /c:"Image Count:"') do (set "_imgCount=%%#")

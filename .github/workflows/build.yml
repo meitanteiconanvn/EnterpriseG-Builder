@@ -1099,21 +1099,30 @@ jobs:
             Write-Host "Build number saved to detected_build_number.txt"
           }
           
-          # Find Professional edition index
+          # Extract edition based on detected type
           if ([string]::IsNullOrWhiteSpace($wimIndex)) {
-            if (-not $proIndex) {
-              Write-Warning "Could not auto-detect Professional edition. Trying index 1..."
-              $proIndex = 1
+            if ($detectedWimIndex) {
+              $selectedIndex = $detectedWimIndex
+              Write-Host "Using auto-detected WIM index: $selectedIndex ($detectedEditionType)"
+            } else {
+              # Fallback: use index 1 for Professional, index 2 for Server Desktop Experience
+              if ($detectedEditionType -eq "Server") {
+                $selectedIndex = 2
+                Write-Warning "Could not auto-detect Server Desktop Experience index. Using default index 2..."
+              } else {
+                $selectedIndex = 1
+                Write-Warning "Could not auto-detect Professional edition. Using default index 1..."
+              }
             }
           } else {
-            $proIndex = [int]$wimIndex
-            Write-Host "Using specified WIM index: $proIndex"
+            $selectedIndex = [int]$wimIndex
+            Write-Host "Using specified WIM index: $selectedIndex"
           }
           
-          Write-Host "Extracting Professional edition (index $proIndex) from WIM..."
+          Write-Host "Extracting $detectedEditionType edition (index $selectedIndex) from WIM..."
           
-          # Extract only Professional edition to install.wim
-          & $wimlibPath export $sourceWimPath $proIndex $wimPath --compress=none
+          # Extract selected edition to install.wim
+          & $wimlibPath export $sourceWimPath $selectedIndex $wimPath --compress=none
           
           if (-not (Test-Path $wimPath)) {
             Write-Error "Failed to extract Professional edition from WIM"
@@ -1253,17 +1262,42 @@ jobs:
         Write-Host "Starting Bedi.cmd in non-interactive mode..."
         Write-Host ""
         
-        # Determine menu option based on target SKU
-        # Menu options: 1=EnterpriseG, 2=EnterpriseS, 3=WNC, 4=Starter
-        $menuOption = switch ($targetSku) {
+        # Determine menu option based on detected edition type and target SKU
+        # Read detected edition type from previous step
+        $detectedEditionType = "Professional"  # Default
+        if (Test-Path "detected_edition_type.txt") {
+          $detectedEditionType = Get-Content "detected_edition_type.txt" -Raw
+          $detectedEditionType = $detectedEditionType.Trim()
+          Write-Host "Detected source edition type: $detectedEditionType" -ForegroundColor Cyan
+        }
+        
+        # Determine menu option intelligently:
+        # - If Professional → option 1 (Pro to EnterpriseG)
+        # - If Server → option 6 (Server to EnterpriseG)
+        # - Otherwise use target SKU mapping
+        $menuOption = $null
+        
+        if ($detectedEditionType -eq "Server") {
+          # Server → option 6 (Server to EnterpriseG)
+          $menuOption = "6"
+          Write-Host "Source is Server edition → Using menu option 6 (Server to EnterpriseG)" -ForegroundColor Green
+        } elseif ($detectedEditionType -eq "Professional") {
+          # Professional → option 1 (Pro to EnterpriseG)
+          $menuOption = "1"
+          Write-Host "Source is Professional edition → Using menu option 1 (Pro to EnterpriseG)" -ForegroundColor Green
+        } else {
+          # Fallback: use target SKU mapping
+          Write-Host "Edition type not detected, using target SKU mapping..."
+          $menuOption = switch ($targetSku) {
             "EnterpriseG" { "1" }
             "EnterpriseS" { "2" }
             "WNC" { "3" }
             "Starter" { "4" }
             default { "1" }
+          }
         }
         
-        Write-Host "Menu option for ${targetSku}: $menuOption"
+        Write-Host "Menu option for ${targetSku} (source: $detectedEditionType): $menuOption"
         
         # Create intelligent PowerShell automation script
         # This script will monitor Bedi.cmd output and automatically send input when prompts appear
